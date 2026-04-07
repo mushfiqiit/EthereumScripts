@@ -1,0 +1,149 @@
+Metadata-Version: 2.4
+Name: py-multibase
+Version: 2.0.0
+Summary: Multibase implementation for Python
+Author-email: Dhruv Baldawa <dhruv@dhruvb.com>
+License: MIT
+Project-URL: Homepage, https://github.com/multiformats/py-multibase
+Project-URL: Download, https://github.com/multiformats/py-multibase/tarball/2.0.0
+Keywords: multibase
+Classifier: Development Status :: 2 - Pre-Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Natural Language :: English
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Requires-Python: <4.0,>=3.10
+Description-Content-Type: text/x-rst
+License-File: LICENSE
+License-File: AUTHORS.rst
+Requires-Dist: python-baseconv<2.0,>=1.2.0
+Requires-Dist: six<2.0,>=1.10.0
+Requires-Dist: morphys<2.0,>=1.0
+Provides-Extra: dev
+Requires-Dist: Sphinx>=5.0.0; extra == "dev"
+Requires-Dist: build>=0.9.0; extra == "dev"
+Requires-Dist: bump-my-version>=1.2.0; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: pre-commit; extra == "dev"
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-runner; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: towncrier<25,>=24; extra == "dev"
+Requires-Dist: tox>=4.10.0; extra == "dev"
+Requires-Dist: twine; extra == "dev"
+Requires-Dist: watchdog>=3.0.0; extra == "dev"
+Requires-Dist: wheel>=0.31.0; extra == "dev"
+Dynamic: license-file
+
+py-multibase
+------------
+
+.. image:: https://img.shields.io/pypi/v/py-multibase.svg
+        :target: https://pypi.python.org/pypi/py-multibase
+
+.. image:: https://github.com/multiformats/py-multibase/actions/workflows/tox.yml/badge.svg
+        :target: https://github.com/multiformats/py-multibase/actions
+
+.. image:: https://readthedocs.org/projects/py-multibase/badge/?version=stable
+        :target: https://py-multibase.readthedocs.io/en/stable/?badge=stable
+        :alt: Documentation Status
+
+`Multibase <https://github.com/multiformats/multibase>`_ implementation for Python
+
+Multibase is a protocol for distinguishing base encodings and other simple string encodings, and for ensuring full compatibility with program interfaces.
+
+It answers the question: Given data d encoded into string s, how can I tell what base d is encoded with?
+
+Base encodings exist because transports have restrictions, use special in-band sequences, or must be human-friendly.
+When systems chose a base to use, it is not always clear which base to use, as there are many tradeoffs in the decision.
+Multibase is here to save programs and programmers from worrying about which encoding is best.
+
+It solves the biggest problem: a program can use multibase to take input or produce output in whichever base is desired.
+
+The important part is that the value is self-describing, letting other programs elsewhere know what encoding it is using.
+
+* Free software: MIT license
+* Documentation: https://py-multibase.readthedocs.io.
+* Python versions: Python 3.10, 3.11, 3.12, 3.13, 3.14
+
+Installation
+============
+
+.. code-block:: shell
+
+    $ pip install py-multibase
+
+
+Sample Usage
+============
+
+.. code-block:: python
+
+    >>> # encoding a buffer
+    >>> from multibase import encode, decode
+    >>> encode('base58btc', 'hello world')
+    b'zStV1DL6CwTryKyV'
+    >>> encode('base64', 'hello world')
+    b'mGhlbGxvIHdvcmxk'
+    >>> # decoding a multibase
+    >>> decode('mGhlbGxvIHdvcmxk')
+    b'hello world'
+    >>> decode(b'zStV1DL6CwTryKyV')
+    b'hello world'
+    >>> decode(encode('base2', b'hello world'))
+    b'hello world'
+
+    >>> # Using reusable Encoder/Decoder classes
+    >>> from multibase import Encoder, Decoder
+    >>> encoder = Encoder('base64')
+    >>> encoded1 = encoder.encode('data1')
+    >>> encoded2 = encoder.encode('data2')
+
+    >>> decoder = Decoder()
+    >>> decoded = decoder.decode(encoded1)
+
+    >>> # Getting encoding information
+    >>> from multibase import get_encoding_info, list_encodings, is_encoding_supported
+    >>> info = get_encoding_info('base64')
+    >>> print(info.encoding, info.code)
+    base64 b'm'
+    >>> all_encodings = list_encodings()
+    >>> is_encoding_supported('base64')
+    True
+
+    >>> # Decode with encoding return
+    >>> encoding, data = decode(encoded1, return_encoding=True)
+    >>> print(f'Encoded with {encoding}: {data}')
+
+
+Supported codecs
+================
+
+* base2
+* base8
+* base10
+* base16
+* base16upper
+* base32hex
+* base32hexupper
+* base32hexpad
+* base32hexpadupper
+* base32
+* base32upper
+* base32pad
+* base32padupper
+* base32z
+* base36
+* base36upper
+* base58flickr
+* base58btc
+* base64
+* base64pad
+* base64url
+* base64urlpad
+* base256emoji

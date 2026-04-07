@@ -1,0 +1,107 @@
+Metadata-Version: 2.4
+Name: py-multihash
+Version: 3.0.0
+Summary: Multihash implementation in Python
+Author-email: Dhruv Baldawa <dhruv@dhruvb.com>
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/multiformats/multihash
+Project-URL: Download, https://github.com/multiformats/multihash/tarball/3.0.0
+Keywords: multihash
+Classifier: Development Status :: 2 - Pre-Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Natural Language :: English
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Requires-Python: <4.0,>=3.10
+Description-Content-Type: text/x-rst
+License-File: LICENSE
+License-File: AUTHORS.rst
+Requires-Dist: varint<2.0,>=1.0.2
+Requires-Dist: six<2.0,>=1.10.0
+Requires-Dist: morphys<2.0,>=1.0
+Requires-Dist: base58<3.0,>=1.0.2
+Requires-Dist: blake3<2.0,>=0.3.0
+Requires-Dist: mmh3<6.0,>=3.0.0
+Provides-Extra: dev
+Requires-Dist: Sphinx>=5.0.0; extra == "dev"
+Requires-Dist: build>=0.9.0; extra == "dev"
+Requires-Dist: bump-my-version>=1.2.0; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: pre-commit; extra == "dev"
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: pytest-runner; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: towncrier<25,>=24; extra == "dev"
+Requires-Dist: tox>=4.10.0; extra == "dev"
+Requires-Dist: twine; extra == "dev"
+Requires-Dist: watchdog>=3.0.0; extra == "dev"
+Requires-Dist: wheel>=0.31.0; extra == "dev"
+Dynamic: license-file
+
+============
+py-multihash
+============
+
+
+.. image:: https://img.shields.io/pypi/v/py-multihash.svg
+        :target: https://pypi.python.org/pypi/py-multihash
+
+.. image:: https://github.com/multiformats/py-multihash/actions/workflows/tox.yml/badge.svg
+        :target: https://github.com/multiformats/py-multihash/actions
+
+.. image:: https://readthedocs.org/projects/multihash/badge/?version=latest
+        :target: https://multihash.readthedocs.io/en/latest/?badge=latest
+        :alt: Documentation Status
+
+
+
+Multihash implementation in Python
+
+
+* Free software: MIT license
+* Documentation: https://multihash.readthedocs.io.
+* Python versions: Python 3.10, 3.11, 3.12, 3.13, 3.14
+
+Features
+--------
+
+* Support for 125+ hash functions including:
+
+  * **Cryptographic hashes**: SHA-1, SHA-2 (224/256/384/512), SHA-3, BLAKE2b, BLAKE2s, BLAKE3
+  * **Variable-length hashes**: SHAKE-128, SHAKE-256
+  * **Non-cryptographic hashes**: MurmurHash3 (32-bit and 128-bit)
+  * **Specialized hashes**: Double-SHA-256 (Bitcoin), Keccak, and more
+  * **BLAKE2 variants**: Full range of digest sizes (8-512 bits for BLAKE2b, 8-256 bits for BLAKE2s)
+
+* Streaming hash computation for large files
+* Hash truncation support
+* JSON serialization
+* MultihashSet collection type
+* Go-compatible API (``sum()``, ``digest()``, ``verify()``)
+
+Quick Start
+-----------
+
+.. code-block:: python
+
+    from multihash import digest, sum, Func
+
+    # Using modern hash functions
+    mh = digest(b"hello world", "blake3")
+
+    # Using MurmurHash3 for fast, non-cryptographic hashing
+    mh = digest(b"data", "murmur3-128")
+
+    # Using BLAKE2b with custom digest size
+    mh = digest(b"data", "blake2b-256")
+
+    # Go-compatible API
+    mh = sum(b"hello world", Func.sha2_256)
+    print(mh.encode('hex'))
+
+For more examples and usage, see the documentation.
