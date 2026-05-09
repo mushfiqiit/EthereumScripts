@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""Generate per-transaction USDC-per-WETH exchange-rate CSVs from chunked transfer exports.
+"""Generate per-transaction USDC-per-WETH exchange-rate CSVs from chunked exports.
 
 For each input CSV in a source directory (e.g. weth_usdc_transfer_chunks), this script:
   1) Filters to transactions where address x sent USDC to address y AND
      address y sent WETH to address x in the same transaction hash.
   2) Computes exchange_rate = normalized_usdc_amount / normalized_weth_amount.
   3) Writes a corresponding output CSV with columns:
-       block_number,from_address,to_address,transaction_id,exchange_rate
+       block_number,from_address,to_address,transaction_id,exchange_rate,
+       weth_amount,max_priority_fee_per_gas,max_fee_per_gas
 
 The output row uses:
   - from_address = x (USDC sender)
   - to_address   = y (USDC receiver)
   - transaction_id = transaction hash
+  - weth_amount = normalized WETH amount transferred from y to x
+
+Fee columns are populated by joining optional transaction-export CSVs from
+--transactions-dir. Export those CSVs with ethereumetl export_transactions over
+the same block ranges as the token-transfer chunks. If no transaction metadata
+is supplied, the fee fields are left blank.
 """
 
 from __future__ import annotations
@@ -39,13 +46,21 @@ REQUIRED_COLUMNS = {
     "block_number",
 }
 
+TRANSACTION_HASH_COLUMNS = ("hash", "transaction_hash", "transaction_id")
+FEE_FIELDS = ("max_priority_fee_per_gas", "max_fee_per_gas")
+
 OUTPUT_FIELDS = [
     "block_number",
     "from_address",
     "to_address",
     "transaction_id",
     "exchange_rate",
+    "weth_amount",
+    "max_priority_fee_per_gas",
+    "max_fee_per_gas",
 ]
+
+TransactionFees = Dict[str, Dict[str, str]]
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,6 +86,21 @@ def parse_args() -> argparse.Namespace:
         "--pattern",
         default="*.csv",
         help="Glob pattern used to select input files within --input-dir.",
+    )
+    parser.add_argument(
+        "--transactions-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Optional directory containing ethereumetl export_transactions CSVs. "
+            "When provided, rows are joined by transaction hash to fill "
+            "max_priority_fee_per_gas and max_fee_per_gas."
+        ),
+    )
+    parser.add_argument(
+        "--transactions-pattern",
+        default="*.csv",
+        help="Glob pattern used to select transaction metadata CSVs.",
     )
     return parser.parse_args()
 
@@ -100,7 +130,71 @@ def ensure_columns(path: Path, fieldnames: Iterable[str] | None) -> None:
         raise ValueError(f"{path} missing required columns: {missing_sorted}")
 
 
-def process_file(input_csv: Path, output_csv: Path) -> int:
+def find_transaction_hash_column(fieldnames: Iterable[str]) -> str | None:
+    available = set(fieldnames)
+    for column in TRANSACTION_HASH_COLUMNS:
+        if column in available:
+            return column
+    return None
+
+
+def load_transaction_fees(transactions_dir: Path | None, pattern: str) -> TransactionFees:
+    """Load max fee fields from transaction CSVs keyed by lower-cased tx hash."""
+    if transactions_dir is None:
+        return {}
+    if not transactions_dir.exists():
+        raise FileNotFoundError(
+            f"Transactions directory does not exist: {transactions_dir}"
+        )
+
+    transaction_files = sorted(
+        path for path in transactions_dir.glob(pattern) if path.is_file()
+    )
+    if not transaction_files:
+        raise FileNotFoundError(
+            f"No transaction CSV files found in {transactions_dir} matching {pattern!r}"
+        )
+
+    fees_by_tx: TransactionFees = {}
+    for transaction_csv in transaction_files:
+        with transaction_csv.open("r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            if reader.fieldnames is None:
+                raise ValueError(f"{transaction_csv} has no header row")
+
+            hash_column = find_transaction_hash_column(reader.fieldnames)
+            if hash_column is None:
+                expected = ", ".join(TRANSACTION_HASH_COLUMNS)
+                raise ValueError(
+                    f"{transaction_csv} is missing a transaction hash column; expected one of: {expected}"
+                )
+
+            missing_fee_columns = [
+                field for field in FEE_FIELDS if field not in reader.fieldnames
+            ]
+            if missing_fee_columns:
+                missing = ", ".join(missing_fee_columns)
+                raise ValueError(
+                    f"{transaction_csv} missing required fee columns: {missing}"
+                )
+
+            for row in reader:
+                tx = normalize_address(row.get(hash_column, ""))
+                if not tx:
+                    continue
+                fees_by_tx[tx] = {
+                    "max_priority_fee_per_gas": (
+                        row.get("max_priority_fee_per_gas") or ""
+                    ).strip(),
+                    "max_fee_per_gas": (row.get("max_fee_per_gas") or "").strip(),
+                }
+
+    return fees_by_tx
+
+
+def process_file(
+    input_csv: Path, output_csv: Path, transaction_fees: TransactionFees
+) -> int:
     # tx -> ((x, y) for USDC x->y) => [usdc_raw_sum, weth_raw_sum, block_number]
     grouped: Dict[str, Dict[Tuple[str, str], List[Decimal | str | None]]] = defaultdict(dict)
 
@@ -169,6 +263,7 @@ def process_file(input_csv: Path, output_csv: Path) -> int:
                     continue
 
                 exchange_rate = usdc_amount / weth_amount
+                fee_values = transaction_fees.get(tx, {})
 
                 writer.writerow(
                     {
@@ -177,6 +272,11 @@ def process_file(input_csv: Path, output_csv: Path) -> int:
                         "to_address": to_address,
                         "transaction_id": tx,
                         "exchange_rate": decimal_to_string(exchange_rate),
+                        "weth_amount": decimal_to_string(weth_amount),
+                        "max_priority_fee_per_gas": fee_values.get(
+                            "max_priority_fee_per_gas", ""
+                        ),
+                        "max_fee_per_gas": fee_values.get("max_fee_per_gas", ""),
                     }
                 )
                 written += 1
@@ -198,10 +298,18 @@ def main() -> None:
             f"No input CSV files found in {args.input_dir} matching {args.pattern!r}"
         )
 
+    transaction_fees = load_transaction_fees(
+        args.transactions_dir, args.transactions_pattern
+    )
+    if args.transactions_dir is None:
+        print("No --transactions-dir provided; fee fields will be blank.")
+    else:
+        print(f"Loaded fee metadata for {len(transaction_fees)} transactions.")
+
     total_rows = 0
     for input_csv in input_files:
         output_csv = args.output_dir / input_csv.name
-        rows = process_file(input_csv, output_csv)
+        rows = process_file(input_csv, output_csv, transaction_fees)
         total_rows += rows
         print(f"{input_csv} -> {output_csv} (rows: {rows})")
 
