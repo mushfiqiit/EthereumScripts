@@ -5,12 +5,6 @@ Expected input CSV columns:
 - block_number
 - exchange_rate
 
-Optional columns shown in hover text when present:
-- transaction_id
-- weth_amount
-- max_priority_fee_per_gas
-- max_fee_per_gas
-
 The script scans a directory of CSV files (typically produced by
 `build_weth_usdc_exchange_rates.py`), combines all rows, and writes an
 interactive HTML scatter plot using Plotly WebGL (`Scattergl`) so large datasets
@@ -82,7 +76,7 @@ def parse_args() -> argparse.Namespace:
 
 def load_points(
     input_dir: Path, pattern: str, *, y_min: float, y_max: float
-) -> Tuple[List[int], List[float], List[List[str]], int, int]:
+) -> Tuple[List[int], List[float], int, int]:
     files = sorted(path for path in input_dir.glob(pattern) if path.is_file())
     if not files:
         raise FileNotFoundError(
@@ -91,7 +85,6 @@ def load_points(
 
     x_values: List[int] = []
     y_values: List[float] = []
-    hover_values: List[List[str]] = []
     skipped_rows = 0
     out_of_range_rows = 0
 
@@ -101,10 +94,7 @@ def load_points(
             if reader.fieldnames is None:
                 skipped_rows += 1
                 continue
-            if (
-                "block_number" not in reader.fieldnames
-                or "exchange_rate" not in reader.fieldnames
-            ):
+            if "block_number" not in reader.fieldnames or "exchange_rate" not in reader.fieldnames:
                 raise ValueError(
                     f"{csv_path} is missing required columns 'block_number' and/or 'exchange_rate'"
                 )
@@ -128,21 +118,13 @@ def load_points(
 
                 x_values.append(block_number)
                 y_values.append(exchange_rate)
-                hover_values.append(
-                    [
-                        (row.get("transaction_id") or "").strip(),
-                        (row.get("weth_amount") or "").strip(),
-                        (row.get("max_priority_fee_per_gas") or "").strip(),
-                        (row.get("max_fee_per_gas") or "").strip(),
-                    ]
-                )
 
     if not x_values:
         raise ValueError(
             "No valid points were loaded. Check the input CSVs and required columns."
         )
 
-    return x_values, y_values, hover_values, skipped_rows, out_of_range_rows
+    return x_values, y_values, skipped_rows, out_of_range_rows
 
 
 def main() -> None:
@@ -167,7 +149,7 @@ def main() -> None:
             "Plotly is required. Install it with: pip install plotly"
         ) from exc
 
-    blocks, rates, hover_values, skipped_rows, out_of_range_rows = load_points(
+    blocks, rates, skipped_rows, out_of_range_rows = load_points(
         args.input_dir, args.pattern, y_min=args.y_min, y_max=args.y_max
     )
 
@@ -182,16 +164,7 @@ def main() -> None:
                     "opacity": args.marker_opacity,
                     "color": "#1f77b4",
                 },
-                customdata=hover_values,
-                hovertemplate=(
-                    "Block: %{x:d}"
-                    "<br>Exchange rate: %{y}"
-                    "<br>Transaction: %{customdata[0]}"
-                    "<br>WETH amount: %{customdata[1]}"
-                    "<br>Max priority fee per gas: %{customdata[2]}"
-                    "<br>Max fee per gas: %{customdata[3]}"
-                    "<extra></extra>"
-                ),
+                hovertemplate="Block: %{x:d}<br>Exchange rate: %{y}<extra></extra>",
                 name="USDC per 1 WETH",
             )
         ]
