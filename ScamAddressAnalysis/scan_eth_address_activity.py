@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
+csv.field_size_limit(sys.maxsize)
 import json
 import shutil
 import subprocess
