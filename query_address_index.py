@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 DB_RE = re.compile(r"^address_block_index_(\d+)_(\d+)\.sqlite$")
+ROOT_RE = re.compile(r"^Ethereum_TT_(\d+)_(\d+)$")
 
 
 def normalize_address(raw: str) -> Optional[str]:
@@ -35,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--db", help="Single SQLite index file")
     group.add_argument("--index-dir", help="Directory containing address_block_index_*.sqlite")
+    parser.add_argument("--root", help="Optional root folder name/path like Ethereum_TT_25112101_25119300 to filter DB ranges when using --index-dir")
     parser.add_argument("--address", required=True, help="Ethereum address to search")
     return parser.parse_args()
 
@@ -56,8 +58,35 @@ def query_one(db_path: Path, address: str) -> list[tuple[int, str, str, str]]:
         conn.close()
 
 
-def gather_dbs(index_dir: Path) -> list[Path]:
+def parse_root_range(root_value: str) -> tuple[int, int]:
+    root_name = Path(root_value).name
+    m = ROOT_RE.match(root_name)
+    if not m:
+        raise SystemExit(f"Invalid root format: {root_value}. Expected Ethereum_TT_<start>_<end>")
+    return int(m.group(1)), int(m.group(2))
+
+
+def db_range_from_name(db_name: str) -> Optional[tuple[int, int]]:
+    m = DB_RE.match(db_name)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def gather_dbs(index_dir: Path, root_range: Optional[tuple[int, int]] = None) -> list[Path]:
     files = [p for p in index_dir.glob("address_block_index_*.sqlite") if p.is_file()]
+
+    if root_range is not None:
+        rs, re_ = root_range
+        filtered = []
+        for p in files:
+            rng = db_range_from_name(p.name)
+            if rng is None:
+                continue
+            ds, de = rng
+            if rs <= ds and de <= re_:
+                filtered.append(p)
+        files = filtered
 
     def sort_key(p: Path) -> tuple[int, int]:
         m = DB_RE.match(p.name)
@@ -81,7 +110,8 @@ def main() -> int:
         idx_dir = Path(args.index_dir)
         if not idx_dir.exists() or not idx_dir.is_dir():
             raise SystemExit(f"Index directory not found: {idx_dir}")
-        db_files = gather_dbs(idx_dir)
+        root_range = parse_root_range(args.root) if args.root else None
+        db_files = gather_dbs(idx_dir, root_range=root_range)
         if not db_files:
             raise SystemExit(f"No address_block_index_*.sqlite files found in {idx_dir}")
 
@@ -106,7 +136,10 @@ def main() -> int:
             print(f"{block}, {role}, {source}")
     else:
         print(f"Address: {address}")
-        print(f"Index directory: {args.index_dir}\n")
+        print(f"Index directory: {args.index_dir}")
+        if args.root:
+            print(f"Root range filter: {args.root}")
+        print()
         print("block_number, role, source, database")
         for block, role, source, db_name in all_rows:
             print(f"{block}, {role}, {source}, {db_name}")

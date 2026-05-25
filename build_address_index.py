@@ -36,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True, help="Output directory for .sqlite index files")
     parser.add_argument("--batch-size", type=int, default=5000, help="Insert batch size for executemany")
     parser.add_argument("--commit-every", type=int, default=20000, help="Commit every N inserted rows")
+    parser.add_argument("--expected-folders", type=int, default=72, help="Expected number of Transaction_TokenTransfer_* folders (default: 72)")
     return parser.parse_args()
 
 
@@ -207,6 +208,8 @@ def main() -> int:
         raise SystemExit(f"No matching subfolders found under: {root}")
 
     print(f"Found {len(subfolders)} range folders under {root}")
+    if args.expected_folders > 0 and len(subfolders) != args.expected_folders:
+        print(f"[WARN] Expected {args.expected_folders} folders but found {len(subfolders)}")
 
     for folder, start, end in subfolders:
         db_path = out_dir / f"address_block_index_{start}_{end}.sqlite"
@@ -257,7 +260,7 @@ def main() -> int:
         finally:
             conn.close()
 
-    print("\nAll indexes built successfully.")
+    print(f"\nAll indexes built successfully. Created/updated {len(subfolders)} SQLite files in {out_dir}")
     return 0
 
 
