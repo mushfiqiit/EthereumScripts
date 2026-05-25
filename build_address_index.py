@@ -16,6 +16,7 @@ import argparse
 import csv
 import re
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
@@ -39,6 +40,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-folders", type=int, default=72, help="Expected number of Transaction_TokenTransfer_* folders (default: 72)")
     return parser.parse_args()
 
+
+
+
+def configure_csv_field_limit() -> int:
+    """Raise CSV parser field size limit to handle very large calldata/input fields."""
+    # Start with the largest practical int and back off if the platform rejects it.
+    limit = sys.maxsize
+    while True:
+        try:
+            return csv.field_size_limit(limit)
+        except OverflowError:
+            limit //= 10
 
 def norm_col(name: str) -> str:
     return name.strip().lower()
@@ -151,32 +164,35 @@ def process_csv_file(
             print(f"  [WARN] {csv_path.name}: {exc}")
             return 0, 0
 
-        for row in reader:
-            block = parse_block_number(row.get(block_col))
-            if block is None:
-                continue
+        try:
+            for row in reader:
+                block = parse_block_number(row.get(block_col))
+                if block is None:
+                    continue
 
-            from_addr = normalize_address(row.get(from_col))
-            to_addr = normalize_address(row.get(to_col))
+                from_addr = normalize_address(row.get(from_col))
+                to_addr = normalize_address(row.get(to_col))
 
-            if from_addr is not None:
-                buffered.append((from_addr, block, "from", source))
-            if to_addr is not None:
-                buffered.append((to_addr, block, "to", source))
+                if from_addr is not None:
+                    buffered.append((from_addr, block, "from", source))
+                if to_addr is not None:
+                    buffered.append((to_addr, block, "to", source))
 
-            if len(buffered) >= batch_size:
-                before = conn.total_changes
-                conn.executemany(
-                    "INSERT OR IGNORE INTO occurrences(address, block_number, role, source) VALUES (?, ?, ?, ?)",
-                    buffered,
-                )
-                inserted = conn.total_changes - before
-                inserted_total += inserted
-                committed_since_last += inserted
-                buffered.clear()
-                if committed_since_last >= commit_every:
-                    conn.commit()
-                    committed_since_last = 0
+                if len(buffered) >= batch_size:
+                    before = conn.total_changes
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO occurrences(address, block_number, role, source) VALUES (?, ?, ?, ?)",
+                        buffered,
+                    )
+                    inserted = conn.total_changes - before
+                    inserted_total += inserted
+                    committed_since_last += inserted
+                    buffered.clear()
+                    if committed_since_last >= commit_every:
+                        conn.commit()
+                        committed_since_last = 0
+        except csv.Error as exc:
+            print(f"  [WARN] CSV parse error in {csv_path}: {exc}. Skipping remaining rows in this file.")
 
     if buffered:
         before = conn.total_changes
@@ -196,6 +212,8 @@ def process_csv_file(
 
 def main() -> int:
     args = parse_args()
+    configured_limit = configure_csv_field_limit()
+    print(f"Configured csv.field_size_limit={configured_limit}")
     root = Path(args.root)
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
