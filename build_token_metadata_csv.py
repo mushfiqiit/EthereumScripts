@@ -1,74 +1,60 @@
 #!/usr/bin/env python3
 
+"""
+build_token_metadata_csv.py
+
+Purpose:
+    Build a token metadata CSV from Ethereum token_transfer CSV files.
+
+What this script does:
+    1. Recursively scans token_transfer_*.csv files.
+    2. Extracts unique token_address values.
+    3. Counts how many times each token appears.
+    4. Tracks first_block and last_block where each token appears.
+    5. Optionally matches token addresses against a common token list.
+    6. Writes one output row per unique token_address.
+
+Important:
+    This script DOES NOT query missing token contracts on-chain.
+    Unknown tokens are kept in the output CSV with blank metadata fields.
+
+Output columns:
+    token_address,
+    token_name,
+    token_symbol,
+    decimals,
+    metadata_source,
+    occurrence_count,
+    first_block,
+    last_block
+
+Example:
+    python build_token_metadata_csv.py \
+      --data-root "/media/dheeman/Seagate Backup Plus Drive1/EthereumCode_Mushfiq/EthereumScripts/NotUploadable/Ethereum_TT_25112101_25119300" \
+      --output token_metadata.csv
+"""
+
 import argparse
 import csv
 import json
-import time
+import sys
+import urllib.request
 from pathlib import Path
 from collections import defaultdict
 
-import requests
-from web3 import Web3
 
-
-ERC20_METADATA_ABI = [
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "name",
-        "outputs": [{"name": "", "type": "string"}],
-        "type": "function",
-    },
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "symbol",
-        "outputs": [{"name": "", "type": "string"}],
-        "type": "function",
-    },
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "decimals",
-        "outputs": [{"name": "", "type": "uint8"}],
-        "type": "function",
-    },
-]
-
-
-# Some old/non-standard ERC-20 contracts return bytes32 instead of string.
-ERC20_BYTES32_METADATA_ABI = [
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "name",
-        "outputs": [{"name": "", "type": "bytes32"}],
-        "type": "function",
-    },
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "symbol",
-        "outputs": [{"name": "", "type": "bytes32"}],
-        "type": "function",
-    },
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "decimals",
-        "outputs": [{"name": "", "type": "uint8"}],
-        "type": "function",
-    },
-]
-
-
-TOKEN_LIST_URLS = [
-    # Uniswap default token list
-    "https://tokens.uniswap.org",
-]
+DEFAULT_TOKEN_LIST_URL = "https://tokens.uniswap.org"
 
 
 def normalize_address(addr):
+    """
+    Normalize an Ethereum address.
+
+    Returns:
+        lowercase 0x-prefixed address if valid,
+        otherwise None.
+    """
+
     if addr is None:
         return None
 
@@ -92,25 +78,46 @@ def normalize_address(addr):
 
 
 def detect_column(fieldnames, candidates):
+    """
+    Detect a column from possible candidate names.
+
+    Example:
+        candidates = ["token_address", "contract_address"]
+
+    Matching is case-insensitive and ignores surrounding whitespace.
+    """
+
     if not fieldnames:
         return None
 
-    normalized = {name.strip().lower(): name for name in fieldnames}
+    normalized = {}
+
+    for name in fieldnames:
+        if name is None:
+            continue
+        normalized[name.strip().lower()] = name
 
     for candidate in candidates:
-        candidate = candidate.lower()
-        if candidate in normalized:
-            return normalized[candidate]
+        key = candidate.strip().lower()
+        if key in normalized:
+            return normalized[key]
 
     return None
 
 
 def extract_block_number_from_filename(path):
-    stem = path.stem
+    """
+    Extract block number from filenames such as:
 
-    # Examples:
-    # token_transfer_25112201.csv
-    # transaction_25112201.csv
+        token_transfer_25112201.csv
+        transaction_25112201.csv
+
+    Returns:
+        int block number if found,
+        otherwise None.
+    """
+
+    stem = path.stem
     parts = stem.split("_")
 
     for part in reversed(parts):
@@ -120,12 +127,30 @@ def extract_block_number_from_filename(path):
     return None
 
 
+def safe_int(value):
+    """
+    Convert value to int safely.
+
+    Returns:
+        int if possible,
+        otherwise None.
+    """
+
+    if value is None:
+        return None
+
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return None
+
+
 def scan_token_transfer_csvs(data_root):
     """
     Recursively scan token_transfer_*.csv files and extract token_address values.
 
     Returns:
-        token_stats[address] = {
+        token_stats[token_address] = {
             "occurrence_count": int,
             "first_block": int or None,
             "last_block": int or None
@@ -133,6 +158,13 @@ def scan_token_transfer_csvs(data_root):
     """
 
     data_root = Path(data_root)
+
+    if not data_root.exists():
+        raise FileNotFoundError(f"Data root does not exist: {data_root}")
+
+    if not data_root.is_dir():
+        raise NotADirectoryError(f"Data root is not a directory: {data_root}")
+
     token_stats = defaultdict(lambda: {
         "occurrence_count": 0,
         "first_block": None,
@@ -141,7 +173,15 @@ def scan_token_transfer_csvs(data_root):
 
     csv_files = sorted(data_root.rglob("token_transfer_*.csv"))
 
+    print(f"[INFO] Data root: {data_root}")
     print(f"[INFO] Found {len(csv_files)} token_transfer CSV files.")
+
+    if not csv_files:
+        print("[WARN] No token_transfer_*.csv files found.")
+        return token_stats
+
+    skipped_no_token_col = 0
+    failed_files = 0
 
     for i, csv_path in enumerate(csv_files, start=1):
         if i % 500 == 0:
@@ -155,29 +195,40 @@ def scan_token_transfer_csvs(data_root):
 
                 token_col = detect_column(
                     reader.fieldnames,
-                    ["token_address", "contract_address", "token", "address"]
+                    [
+                        "token_address",
+                        "contract_address",
+                        "token",
+                        "address",
+                    ]
                 )
 
                 block_col = detect_column(
                     reader.fieldnames,
-                    ["block_number", "blockNumber", "block"]
+                    [
+                        "block_number",
+                        "blocknumber",
+                        "block",
+                    ]
                 )
 
                 if token_col is None:
+                    skipped_no_token_col += 1
                     print(f"[WARN] No token_address column found in {csv_path}")
                     continue
 
                 for row in reader:
                     token_address = normalize_address(row.get(token_col))
+
                     if not token_address:
                         continue
 
-                    if block_col and row.get(block_col):
-                        try:
-                            block_number = int(row.get(block_col))
-                        except ValueError:
-                            block_number = block_from_filename
-                    else:
+                    block_number = None
+
+                    if block_col:
+                        block_number = safe_int(row.get(block_col))
+
+                    if block_number is None:
                         block_number = block_from_filename
 
                     stats = token_stats[token_address]
@@ -191,183 +242,158 @@ def scan_token_transfer_csvs(data_root):
                             stats["last_block"] = block_number
 
         except Exception as e:
+            failed_files += 1
             print(f"[WARN] Failed to read {csv_path}: {e}")
 
+    print(f"[INFO] Finished scanning token transfer CSV files.")
     print(f"[INFO] Unique token addresses found: {len(token_stats)}")
+    print(f"[INFO] Files skipped due to missing token_address column: {skipped_no_token_col}")
+    print(f"[INFO] Files failed due to read/parsing errors: {failed_files}")
+
     return token_stats
 
 
-def load_token_lists():
+def load_json_from_url(url):
     """
-    Load curated token metadata from public token lists.
+    Load JSON from URL using Python standard library.
+
+    This makes only one request to the token list URL.
+    It does not make any per-token requests.
+    """
+
+    print(f"[INFO] Loading token list from URL: {url}")
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 token-metadata-builder"
+        }
+    )
+
+    with urllib.request.urlopen(request, timeout=60) as response:
+        raw = response.read().decode("utf-8")
+
+    return json.loads(raw)
+
+
+def load_json_from_file(path):
+    """
+    Load token list JSON from local file.
+    """
+
+    path = Path(path)
+
+    print(f"[INFO] Loading token list from local file: {path}")
+
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def parse_token_list(data, chain_id=1):
+    """
+    Parse a Uniswap-style token list JSON.
 
     Returns:
         metadata[address] = {
             "token_name": str,
             "token_symbol": str,
-            "decimals": int,
-            "source": "token_list"
+            "decimals": int or "",
+            "metadata_source": str
         }
     """
 
     metadata = {}
 
-    for url in TOKEN_LIST_URLS:
-        print(f"[INFO] Loading token list: {url}")
+    tokens = data.get("tokens", [])
 
-        try:
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-        except Exception as e:
-            print(f"[WARN] Failed to load token list {url}: {e}")
+    if not isinstance(tokens, list):
+        print("[WARN] Token list JSON does not contain a valid 'tokens' list.")
+        return metadata
+
+    for token in tokens:
+        if not isinstance(token, dict):
             continue
 
-        tokens = data.get("tokens", [])
+        if token.get("chainId") != chain_id:
+            continue
 
-        for token in tokens:
-            # Ethereum mainnet = chainId 1
-            if token.get("chainId") != 1:
-                continue
+        address = normalize_address(token.get("address"))
 
-            address = normalize_address(token.get("address"))
-            if not address:
-                continue
+        if not address:
+            continue
 
-            metadata[address] = {
-                "token_name": token.get("name", ""),
-                "token_symbol": token.get("symbol", ""),
-                "decimals": token.get("decimals", ""),
-                "source": "token_list",
-            }
+        decimals = token.get("decimals", "")
 
-    print(f"[INFO] Loaded {len(metadata)} Ethereum mainnet tokens from token lists.")
+        if decimals != "":
+            try:
+                decimals = int(decimals)
+            except Exception:
+                decimals = ""
+
+        metadata[address] = {
+            "token_name": str(token.get("name", "") or ""),
+            "token_symbol": str(token.get("symbol", "") or ""),
+            "decimals": decimals,
+            "metadata_source": "token_list",
+        }
+
+    print(f"[INFO] Loaded {len(metadata)} token metadata entries for chain_id={chain_id}.")
     return metadata
 
 
-def bytes32_to_text(value):
-    if isinstance(value, bytes):
-        return value.rstrip(b"\x00").decode("utf-8", errors="replace")
-    return str(value)
-
-
-def query_contract_metadata(w3, token_address):
+def load_token_metadata_from_list(token_list_url=None, token_list_json=None, chain_id=1):
     """
-    Query ERC-20 name(), symbol(), decimals() directly from the token contract.
-    Tries normal string ABI first, then bytes32 fallback.
+    Load metadata from either:
+        1. local token list JSON file, or
+        2. token list URL.
+
+    This does not query missing tokens individually.
     """
 
-    checksum_address = to_checksum_address_compat(token_address)
-    # First try standard string-returning metadata ABI.
-    try:
-        contract = w3.eth.contract(
-            address=checksum_address,
-            abi=ERC20_METADATA_ABI
-        )
+    if token_list_json:
+        data = load_json_from_file(token_list_json)
+        return parse_token_list(data, chain_id=chain_id)
 
-        name = contract.functions.name().call()
-        symbol = contract.functions.symbol().call()
-        decimals = contract.functions.decimals().call()
+    if token_list_url:
+        try:
+            data = load_json_from_url(token_list_url)
+            return parse_token_list(data, chain_id=chain_id)
+        except Exception as e:
+            print(f"[WARN] Failed to load token list from URL: {e}")
+            print("[WARN] Continuing without external token metadata.")
+            return {}
 
-        return {
-            "token_name": str(name),
-            "token_symbol": str(symbol),
-            "decimals": int(decimals),
-            "source": "onchain",
-        }
-
-    except Exception:
-        pass
-
-    # Then try old/non-standard bytes32-returning ABI.
-    try:
-        contract = w3.eth.contract(
-            address=checksum_address,
-            abi=ERC20_BYTES32_METADATA_ABI
-        )
-
-        name = bytes32_to_text(contract.functions.name().call())
-        symbol = bytes32_to_text(contract.functions.symbol().call())
-        decimals = contract.functions.decimals().call()
-
-        return {
-            "token_name": name,
-            "token_symbol": symbol,
-            "decimals": int(decimals),
-            "source": "onchain_bytes32",
-        }
-
-    except Exception as e:
-        return {
-            "token_name": "",
-            "token_symbol": "",
-            "decimals": "",
-            "source": f"failed: {type(e).__name__}",
-        }
-
-def web3_is_connected(w3):
-    if hasattr(w3, "is_connected"):
-        return w3.is_connected()
-    if hasattr(w3, "isConnected"):
-        return w3.isConnected()
-    raise AttributeError("This Web3 version has neither is_connected() nor isConnected().")
-
-
-def get_latest_block_number(w3):
-    if hasattr(w3.eth, "block_number"):
-        return w3.eth.block_number
-    if hasattr(w3.eth, "blockNumber"):
-        return w3.eth.blockNumber
-    raise AttributeError("This Web3 version has neither eth.block_number nor eth.blockNumber.")
-
-
-def to_checksum_address_compat(address):
-    if hasattr(Web3, "to_checksum_address"):
-        return Web3.to_checksum_address(address)
-    if hasattr(Web3, "toChecksumAddress"):
-        return Web3.toChecksumAddress(address)
-    raise AttributeError("This Web3 version has neither to_checksum_address() nor toChecksumAddress().")
-
-
-def enrich_with_onchain_metadata(token_stats, metadata, rpc_url, sleep_seconds=0.0):
-    w3 = Web3(Web3.HTTPProvider(rpc_url))
-
-    if not web3_is_connected(w3):
-        raise RuntimeError(f"Could not connect to Ethereum RPC: {rpc_url}")
-
-    print(f"[INFO] Connected to Ethereum RPC. Latest block: {get_latest_block_number(w3)}")
-    
-    missing = [addr for addr in token_stats.keys() if addr not in metadata]
-
-    print(f"[INFO] Tokens missing from token list: {len(missing)}")
-    print("[INFO] Querying missing token contracts on-chain...")
-
-    for i, token_address in enumerate(missing, start=1):
-        if i % 100 == 0:
-            print(f"[INFO] Queried {i}/{len(missing)} missing tokens...")
-
-        metadata[token_address] = query_contract_metadata(w3, token_address)
-
-        if sleep_seconds > 0:
-            time.sleep(sleep_seconds)
-
-    return metadata
+    return {}
 
 
 def write_output_csv(token_stats, metadata, output_path):
+    """
+    Write one row per unique token address.
+
+    Unknown tokens are still written, but their name/symbol/decimals are blank.
+    """
+
     output_path = Path(output_path)
 
     rows = []
 
     for address, stats in token_stats.items():
-        meta = metadata.get(address, {})
+        meta = metadata.get(address)
+
+        if meta is None:
+            meta = {
+                "token_name": "",
+                "token_symbol": "",
+                "decimals": "",
+                "metadata_source": "missing_from_token_list",
+            }
 
         rows.append({
             "token_address": address,
             "token_name": meta.get("token_name", ""),
             "token_symbol": meta.get("token_symbol", ""),
             "decimals": meta.get("decimals", ""),
-            "source": meta.get("source", "missing"),
+            "metadata_source": meta.get("metadata_source", ""),
             "occurrence_count": stats.get("occurrence_count", 0),
             "first_block": stats.get("first_block", ""),
             "last_block": stats.get("last_block", ""),
@@ -384,7 +410,7 @@ def write_output_csv(token_stats, metadata, output_path):
             "token_name",
             "token_symbol",
             "decimals",
-            "source",
+            "metadata_source",
             "occurrence_count",
             "first_block",
             "last_block",
@@ -394,24 +420,27 @@ def write_output_csv(token_stats, metadata, output_path):
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"[INFO] Wrote token metadata CSV: {output_path}")
+    known = sum(1 for row in rows if row["metadata_source"] == "token_list")
+    missing = sum(1 for row in rows if row["metadata_source"] == "missing_from_token_list")
+
+    print(f"[INFO] Wrote output CSV: {output_path}")
+    print(f"[INFO] Total unique token addresses written: {len(rows)}")
+    print(f"[INFO] Tokens matched from token list: {known}")
+    print(f"[INFO] Tokens missing from token list: {missing}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Build a token metadata CSV from Ethereum token_transfer CSV files."
+        description=(
+            "Build a token metadata CSV from Ethereum token_transfer CSV files. "
+            "This script does not perform per-token on-chain RPC queries."
+        )
     )
 
     parser.add_argument(
         "--data-root",
         required=True,
-        help="Root folder containing Ethereum_TT_* folders."
-    )
-
-    parser.add_argument(
-        "--rpc",
-        required=True,
-        help="Ethereum JSON-RPC URL, for example http://10.112.249.200:8545"
+        help="Root folder containing Ethereum_TT_* folders or one Ethereum_TT_* folder."
     )
 
     parser.add_argument(
@@ -421,30 +450,54 @@ def main():
     )
 
     parser.add_argument(
-        "--sleep",
-        type=float,
-        default=0.0,
-        help="Sleep seconds between on-chain RPC calls. Useful for public RPC rate limits."
+        "--chain-id",
+        type=int,
+        default=1,
+        help="Chain ID to filter token list entries. Ethereum mainnet = 1. Default: 1"
     )
 
     parser.add_argument(
-        "--skip-onchain",
+        "--token-list-url",
+        default=DEFAULT_TOKEN_LIST_URL,
+        help=(
+            "Token list URL to use for common token metadata. "
+            "Default: https://tokens.uniswap.org"
+        )
+    )
+
+    parser.add_argument(
+        "--token-list-json",
+        default=None,
+        help=(
+            "Optional local token list JSON file. "
+            "If provided, this is used instead of --token-list-url."
+        )
+    )
+
+    parser.add_argument(
+        "--skip-token-list",
         action="store_true",
-        help="Only use token lists. Do not query token contracts on-chain."
+        help=(
+            "Only extract token addresses from CSVs. "
+            "Do not load any token list. Metadata fields will be blank."
+        )
     )
 
     args = parser.parse_args()
 
     token_stats = scan_token_transfer_csvs(args.data_root)
 
-    metadata = load_token_lists()
+    if not token_stats:
+        print("[WARN] No token addresses found. Writing empty output CSV.")
 
-    if not args.skip_onchain:
-        metadata = enrich_with_onchain_metadata(
-            token_stats=token_stats,
-            metadata=metadata,
-            rpc_url=args.rpc,
-            sleep_seconds=args.sleep,
+    if args.skip_token_list:
+        print("[INFO] Skipping token list loading. Metadata fields will be blank.")
+        metadata = {}
+    else:
+        metadata = load_token_metadata_from_list(
+            token_list_url=args.token_list_url,
+            token_list_json=args.token_list_json,
+            chain_id=args.chain_id,
         )
 
     write_output_csv(
@@ -455,4 +508,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[INFO] Interrupted by user.")
+        sys.exit(130)
+    except Exception as e:
+        print(f"[ERROR] {e}")
+        sys.exit(1)
