@@ -257,8 +257,7 @@ def query_contract_metadata(w3, token_address):
     Tries normal string ABI first, then bytes32 fallback.
     """
 
-    checksum_address = Web3.to_checksum_address(token_address)
-
+    checksum_address = to_checksum_address_compat(token_address)
     # First try standard string-returning metadata ABI.
     try:
         contract = w3.eth.contract(
@@ -306,15 +305,38 @@ def query_contract_metadata(w3, token_address):
             "source": f"failed: {type(e).__name__}",
         }
 
+def web3_is_connected(w3):
+    if hasattr(w3, "is_connected"):
+        return w3.is_connected()
+    if hasattr(w3, "isConnected"):
+        return w3.isConnected()
+    raise AttributeError("This Web3 version has neither is_connected() nor isConnected().")
+
+
+def get_latest_block_number(w3):
+    if hasattr(w3.eth, "block_number"):
+        return w3.eth.block_number
+    if hasattr(w3.eth, "blockNumber"):
+        return w3.eth.blockNumber
+    raise AttributeError("This Web3 version has neither eth.block_number nor eth.blockNumber.")
+
+
+def to_checksum_address_compat(address):
+    if hasattr(Web3, "to_checksum_address"):
+        return Web3.to_checksum_address(address)
+    if hasattr(Web3, "toChecksumAddress"):
+        return Web3.toChecksumAddress(address)
+    raise AttributeError("This Web3 version has neither to_checksum_address() nor toChecksumAddress().")
+
 
 def enrich_with_onchain_metadata(token_stats, metadata, rpc_url, sleep_seconds=0.0):
     w3 = Web3(Web3.HTTPProvider(rpc_url))
 
-    if not w3.is_connected():
+    if not web3_is_connected(w3):
         raise RuntimeError(f"Could not connect to Ethereum RPC: {rpc_url}")
 
-    print(f"[INFO] Connected to Ethereum RPC. Latest block: {w3.eth.block_number}")
-
+    print(f"[INFO] Connected to Ethereum RPC. Latest block: {get_latest_block_number(w3)}")
+    
     missing = [addr for addr in token_stats.keys() if addr not in metadata]
 
     print(f"[INFO] Tokens missing from token list: {len(missing)}")
