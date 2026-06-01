@@ -1,0 +1,139 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        
+            <script src="lib/bindings/utils.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            
+        
+<center>
+<h1></h1>
+</center>
+
+<!-- <link rel="stylesheet" href="../node_modules/vis/dist/vis.min.css" type="text/css" />
+<script type="text/javascript" src="../node_modules/vis/dist/vis.js"> </script>-->
+        <link
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-eOJMYsd53ii+scO/bJGFsiCZc+5NDVN2yr8+0RDqr0Ql0h+rP48ckxlpbzKgwra6"
+          crossorigin="anonymous"
+        />
+        <script
+          src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js"
+          integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf"
+          crossorigin="anonymous"
+        ></script>
+
+
+        <center>
+          <h1></h1>
+        </center>
+        <style type="text/css">
+
+             #mynetwork {
+                 width: 100%;
+                 height: 1200px;
+                 background-color: #ffffff;
+                 border: 1px solid lightgray;
+                 position: relative;
+                 float: left;
+             }
+
+             
+
+             
+             #config {
+                 float: left;
+                 width: 400px;
+                 height: 600px;
+             }
+             
+
+             
+        </style>
+    </head>
+
+
+    <body>
+        <div class="card" style="width: 100%">
+            
+            
+            <div id="mynetwork" class="card-body"></div>
+        </div>
+
+        
+        
+            <div id="config"></div>
+        
+
+        <script type="text/javascript">
+
+              // initialize global variables.
+              var edges;
+              var nodes;
+              var allNodes;
+              var allEdges;
+              var nodeColors;
+              var originalNodes;
+              var network;
+              var container;
+              var options, data;
+              var filter = {
+                  item : '',
+                  property : '',
+                  value : []
+              };
+
+              
+
+              
+
+              // This method is responsible for drawing the graph, returns the drawn network
+              function drawGraph() {
+                  var container = document.getElementById('mynetwork');
+
+                  
+
+                  // parsing and collecting nodes and edges from the python
+                  nodes = new vis.DataSet([{"borderWidth": 4, "color": "#ff6b35", "font": {"color": "#222222"}, "id": "0x4cd11afce55052dce8d9ce7a10835700a01f174e", "label": "ROOT: 0x4cd1...174e", "shape": "dot", "size": 34, "title": "\u003cb\u003eROOT Address\u003c/b\u003e: 0x4cd11afce55052dce8d9ce7a10835700a01f174e\u003cbr\u003e\u003cb\u003eDiscovery depth\u003c/b\u003e: 0\u003cbr\u003e\u003cb\u003eIn degree\u003c/b\u003e: 0\u003cbr\u003e\u003cb\u003eOut degree\u003c/b\u003e: 1\u003cbr\u003e\u003cb\u003eTotal degree\u003c/b\u003e: 1"}, {"borderWidth": 1, "color": "#6baed6", "font": {"color": "#222222"}, "id": "0x7516c3fd70f7fa47e36833661e140b8844058789", "label": "0x7516...8789", "shape": "dot", "size": 13, "title": "\u003cb\u003eAddress\u003c/b\u003e: 0x7516c3fd70f7fa47e36833661e140b8844058789\u003cbr\u003e\u003cb\u003eDiscovery depth\u003c/b\u003e: 1\u003cbr\u003e\u003cb\u003eIn degree\u003c/b\u003e: 1\u003cbr\u003e\u003cb\u003eOut degree\u003c/b\u003e: 0\u003cbr\u003e\u003cb\u003eTotal degree\u003c/b\u003e: 1"}]);
+                  edges = new vis.DataSet([{"arrows": "to", "color": "#31a354", "from": "0x4cd11afce55052dce8d9ce7a10835700a01f174e", "label": "25119349, unknown", "smooth": {"enabled": true, "type": "dynamic"}, "title": "\u003cb\u003esource_type\u003c/b\u003e: token_transfer\u003cbr\u003e\u003cb\u003eblock_number\u003c/b\u003e: 25119349\u003cbr\u003e\u003cb\u003etransaction_hash\u003c/b\u003e: 0xe0dd434b63576b9116e82b9e232333ac82eb798e7db9547206569dddd138701c\u003cbr\u003e\u003cb\u003etoken_symbol\u003c/b\u003e: U\u0301\u0405D\u0421\u003cbr\u003e\u003cb\u003etoken_address\u003c/b\u003e: 0x21e6c175cba81237fe44cd63a12d175203dca3f8\u003cbr\u003e\u003cb\u003eraw_value\u003c/b\u003e: 3000000000\u003cbr\u003e\u003cb\u003edecimal\u003c/b\u003e: 6\u003cbr\u003e\u003cb\u003emedian_exchange_rate_USD\u003c/b\u003e: \u003cbr\u003e\u003cb\u003etransfer_value_USD\u003c/b\u003e: unknown\u003cbr\u003e\u003cb\u003ecsv_file\u003c/b\u003e: /media/dheeman/Seagate Backup Plus Drive1/EthereumCode_Mushfiq/EthereumScripts/NotUploadable/Ethereum_TT_25119301_25126500/Transaction_TokenTransfer_25119301_25119400/token_transfer_25119349.csv", "to": "0x7516c3fd70f7fa47e36833661e140b8844058789"}]);
+
+                  nodeColors = {};
+                  allNodes = nodes.get({ returnType: "Object" });
+                  for (nodeId in allNodes) {
+                    nodeColors[nodeId] = allNodes[nodeId].color;
+                  }
+                  allEdges = edges.get({ returnType: "Object" });
+                  // adding nodes and edges to the graph
+                  data = {nodes: nodes, edges: edges};
+
+                  var options = {"interaction": {"hover": true, "navigationButtons": true, "keyboard": true, "dragNodes": true, "dragView": true, "zoomView": true}, "edges": {"font": {"size": 11, "align": "middle"}, "arrows": {"to": {"enabled": true, "scaleFactor": 0.8}}}, "nodes": {"font": {"size": 15}}, "physics": {"enabled": true, "solver": "forceAtlas2Based", "stabilization": {"enabled": true, "iterations": 250, "updateInterval": 25}, "forceAtlas2Based": {"gravitationalConstant": -80, "centralGravity": 0.01, "springLength": 260, "springConstant": 0.04, "damping": 0.4, "avoidOverlap": 0.5}}};
+
+                  
+
+
+                  
+                  // if this network requires displaying the configure window,
+                  // put it in its div
+                  options.configure["container"] = document.getElementById("config");
+                  
+
+                  network = new vis.Network(container, data, options);
+
+                  
+
+                  
+
+                  
+
+
+                  
+
+                  return network;
+
+              }
+              drawGraph();
+        </script>
+    </body>
+</html>
