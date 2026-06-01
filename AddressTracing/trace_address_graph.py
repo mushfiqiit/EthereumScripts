@@ -108,7 +108,10 @@ class TraceStats:
     unknown_transfer_value_edges: int = 0
     missing_csv_files: int = 0
     skipped_min_usd_edges: int = 0
+    skipped_max_node_edges: int = 0
     duplicate_edges: int = 0
+    enqueued_addresses: int = 0
+    traversal_stop_reason: str = "queue exhausted"
 
 
 def configure_csv_field_limit() -> None:
@@ -449,6 +452,7 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
     edge_keys: set[tuple[str, str, int, str, str, str, str]] = set()
     queue: deque[tuple[str, int]] = deque([(root, 0)])
     queried_addresses: set[str] = set()
+    stats.enqueued_addresses = 1
 
     while queue:
         current, depth = queue.popleft()
@@ -462,6 +466,13 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
             block for block in query_address_blocks(current, db_files, address_block_cache, stats)
             if args.start_block <= block <= args.end_block
         )
+        starting_edges = len(edges)
+        starting_nodes = len(discovered_depth)
+        starting_duplicates = stats.duplicate_edges
+        starting_min_usd_skips = stats.skipped_min_usd_edges
+        starting_max_node_skips = stats.skipped_max_node_edges
+        starting_enqueued = stats.enqueued_addresses
+
         logging.info(
             "Query %s depth=%s matched %s unique block(s); nodes=%s edges=%s queue=%s",
             short_address(current), depth, len(blocks), len(discovered_depth), len(edges), len(queue),
@@ -469,6 +480,7 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
 
         for block_number in blocks:
             if args.max_edges is not None and len(edges) >= args.max_edges:
+                stats.traversal_stop_reason = f"--max-edges={args.max_edges} reached"
                 logging.warning("Stopping traversal because --max-edges=%s was reached.", args.max_edges)
                 return discovered_depth, edges, stats
 
@@ -500,6 +512,7 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
                     stats.duplicate_edges += 1
                     continue
                 if args.max_edges is not None and len(edges) >= args.max_edges:
+                    stats.traversal_stop_reason = f"--max-edges={args.max_edges} reached"
                     logging.warning("Stopping traversal because --max-edges=%s was reached.", args.max_edges)
                     return discovered_depth, edges, stats
 
@@ -509,6 +522,7 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
                     if address not in discovered_depth
                 ]
                 if args.max_nodes is not None and len(discovered_depth) + len(set(missing_endpoints)) > args.max_nodes:
+                    stats.skipped_max_node_edges += 1
                     continue
                 for address in missing_endpoints:
                     discovered_depth[address] = depth + 1
@@ -527,6 +541,21 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
                     ):
                         queued_or_queried.add(neighbor)
                         queue.append((neighbor, next_depth))
+                        stats.enqueued_addresses += 1
+
+        logging.info(
+            "Finished %s depth=%s: added_edges=%s added_nodes=%s enqueued_neighbors=%s "
+            "duplicates_seen=%s min_usd_skips=%s max_node_skips=%s remaining_queue=%s",
+            short_address(current),
+            depth,
+            len(edges) - starting_edges,
+            len(discovered_depth) - starting_nodes,
+            stats.enqueued_addresses - starting_enqueued,
+            stats.duplicate_edges - starting_duplicates,
+            stats.skipped_min_usd_edges - starting_min_usd_skips,
+            stats.skipped_max_node_edges - starting_max_node_skips,
+            len(queue),
+        )
 
     return discovered_depth, edges, stats
 
@@ -699,6 +728,9 @@ def main(argv: list[str] | None = None) -> int:
     logging.info("Unknown transfer-value edges: %s", stats.unknown_transfer_value_edges)
     logging.info("Duplicate edges skipped: %s", stats.duplicate_edges)
     logging.info("Edges skipped by --min-usd-value: %s", stats.skipped_min_usd_edges)
+    logging.info("Edges skipped by --max-nodes: %s", stats.skipped_max_node_edges)
+    logging.info("Addresses enqueued for BFS: %s", stats.enqueued_addresses)
+    logging.info("Traversal stop reason: %s", stats.traversal_stop_reason)
     logging.info("Missing CSV file lookups: %s", stats.missing_csv_files)
     logging.info("Output HTML path: %s", args.output_html)
     logging.info("Output edges CSV path: %s", args.output_edges_csv)
