@@ -615,6 +615,153 @@ def edge_title(edge: TransferEdge) -> str:
     return "<br>".join(f"<b>{html.escape(k)}</b>: {html.escape(v)}" for k, v in rows)
 
 
+
+def build_static_graph_fallback(discovered_depth: dict[str, int], edges: list[TransferEdge], root: str) -> str:
+    """Build a dependency-free SVG/list fallback so the HTML never looks blank.
+
+    Pyvis provides the interactive graph, but browser security settings, old pyvis
+    versions, missing local assets, or GitHub's normal source viewer can prevent
+    the JavaScript graph from rendering. This fallback is intentionally plain
+    HTML/SVG and remains visible above the interactive canvas.
+    """
+    node_addresses = sorted(
+        set(discovered_depth)
+        | {edge.source_address for edge in edges}
+        | {edge.target_address for edge in edges},
+        key=lambda item: (discovered_depth.get(item, sys.maxsize), item),
+    )
+    if not node_addresses:
+        return ""
+
+    width = 1100
+    height = max(260, 140 + 90 * len(node_addresses))
+    x_left = 130
+    x_right = width - 190
+    root_y = 90
+    positions: dict[str, tuple[int, int]] = {root: (x_left, root_y)}
+    others = [address for address in node_addresses if address != root]
+    for index, address in enumerate(others):
+        positions[address] = (x_right, 90 + index * 90)
+
+    svg_parts = [
+        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Static Ethereum address graph preview" '
+        'style="width:100%;max-width:1200px;height:auto;border:1px solid #d0d7de;background:#fff;border-radius:8px;">',
+        '<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">'
+        '<polygon points="0 0, 10 3.5, 0 7" fill="#555"></polygon></marker></defs>',
+    ]
+    rendered_edge_count = 0
+    for edge in edges[:200]:
+        source_pos = positions.get(edge.source_address)
+        target_pos = positions.get(edge.target_address)
+        if source_pos is None or target_pos is None:
+            continue
+        sx, sy = source_pos
+        tx, ty = target_pos
+        label_x = (sx + tx) // 2
+        label_y = (sy + ty) // 2 - 8
+        stroke = "#31a354" if edge.source_type == "token_transfer" else "#7f7f7f"
+        svg_parts.append(
+            f'<line x1="{sx + 48}" y1="{sy}" x2="{tx - 48}" y2="{ty}" '
+            f'stroke="{stroke}" stroke-width="2" marker-end="url(#arrowhead)"></line>'
+        )
+        svg_parts.append(
+            f'<text x="{label_x}" y="{label_y}" text-anchor="middle" font-size="13" fill="#24292f">'
+            f'{html.escape(str(edge.block_number))}, {html.escape(edge.transfer_value_label)}</text>'
+        )
+        rendered_edge_count += 1
+
+    for address in node_addresses:
+        x, y = positions[address]
+        is_root = address == root
+        fill = "#ff6b35" if is_root else "#6baed6"
+        label = f"ROOT: {short_address(address)}" if is_root else short_address(address)
+        svg_parts.append(f'<circle cx="{x}" cy="{y}" r="34" fill="{fill}" stroke="#24292f" stroke-width="2"></circle>')
+        svg_parts.append(
+            f'<text x="{x}" y="{y + 54}" text-anchor="middle" font-size="14" fill="#24292f">'
+            f'{html.escape(label)}</text>'
+        )
+    if len(edges) > rendered_edge_count:
+        svg_parts.append(
+            f'<text x="{width // 2}" y="{height - 24}" text-anchor="middle" font-size="13" fill="#57606a">'
+            f'Static preview rendered {rendered_edge_count} of {len(edges)} edges; use CSV outputs for all edges.</text>'
+        )
+    svg_parts.append("</svg>")
+
+    edge_rows = []
+    for edge in edges[:25]:
+        edge_rows.append(
+            "<tr>"
+            f"<td>{html.escape(short_address(edge.source_address))}</td>"
+            f"<td>{html.escape(short_address(edge.target_address))}</td>"
+            f"<td>{html.escape(edge.source_type)}</td>"
+            f"<td>{edge.block_number}</td>"
+            f"<td>{html.escape(edge.transfer_value_label)}</td>"
+            "</tr>"
+        )
+    if not edge_rows:
+        edge_rows.append('<tr><td colspan="5">No retained edges were discovered.</td></tr>')
+
+    return f"""
+<div id="address-trace-static-fallback" style="font-family:Arial, sans-serif; margin:16px; padding:16px; border:1px solid #d0d7de; border-radius:10px; background:#f6f8fa;">
+  <h2 style="margin-top:0;">Address trace graph preview</h2>
+  <p style="margin:0 0 10px 0; color:#57606a;">
+    This static SVG preview is always rendered. The interactive pyvis graph is below it. If the interactive graph area is blank, the browser did not load or execute the pyvis/vis-network JavaScript, but the graph data was generated.
+  </p>
+  <p style="margin:0 0 12px 0;"><strong>Nodes:</strong> {len(node_addresses)} &nbsp; <strong>Edges:</strong> {len(edges)} &nbsp; <strong>Root:</strong> <code>{html.escape(root)}</code></p>
+  {''.join(svg_parts)}
+  <details style="margin-top:14px;">
+    <summary>First retained edges</summary>
+    <table style="border-collapse:collapse;margin-top:10px;background:#fff;">
+      <thead><tr><th>Source</th><th>Target</th><th>Type</th><th>Block</th><th>Value</th></tr></thead>
+      <tbody>{''.join(edge_rows)}</tbody>
+    </table>
+  </details>
+</div>
+<script>
+(function() {{
+  function fitInteractiveNetwork() {{
+    try {{
+      if (typeof network !== 'undefined' && network && typeof network.fit === 'function') {{
+        network.once('stabilized', function() {{ network.fit({{animation: true}}); }});
+        setTimeout(function() {{ network.fit({{animation: true}}); }}, 1000);
+      }}
+    }} catch (error) {{
+      console.warn('AddressTracing: interactive pyvis fit failed', error);
+    }}
+  }}
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', fitInteractiveNetwork);
+  }} else {{
+    fitInteractiveNetwork();
+  }}
+}})();
+</script>
+"""
+
+
+def inject_static_graph_fallback(output_path: Path, fallback_html: str) -> None:
+    if not fallback_html:
+        return
+    try:
+        content = output_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        logging.warning("Could not inject static graph fallback into %s: %s", output_path, exc)
+        return
+
+    if "address-trace-static-fallback" in content:
+        return
+    body_match = re.search(r"<body[^>]*>", content, flags=re.IGNORECASE)
+    if body_match:
+        insert_at = body_match.end()
+        content = content[:insert_at] + "\n" + fallback_html + "\n" + content[insert_at:]
+    else:
+        content = fallback_html + "\n" + content
+    try:
+        output_path.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        logging.warning("Could not write static graph fallback into %s: %s", output_path, exc)
+
+
 def write_html_graph(discovered_depth: dict[str, int], edges: list[TransferEdge], root: str, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     in_degree, out_degree = degree_counts(edges)
@@ -699,6 +846,7 @@ def write_html_graph(discovered_depth: dict[str, int], edges: list[TransferEdge]
         """
     )
     net.write_html(str(output_path), notebook=False, open_browser=False)
+    inject_static_graph_fallback(output_path, build_static_graph_fallback(discovered_depth, edges, root))
     warn_if_html_references_local_pyvis_assets(output_path)
 
 
