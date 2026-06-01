@@ -18,6 +18,7 @@ from web3 import Web3
 DEFAULT_RPC_URL = "http://10.112.249.200:8545"
 OUTPUT_FIELDS = ["token_address", "token_symbol", "decimal", "token_occurrence_count"]
 CACHE_FIELDS = ["token_address", "token_symbol", "decimal"]
+DEFAULT_MIN_OCCURRENCE_COUNT = 20
 
 ERC20_STRING_ABI = [
     {
@@ -106,6 +107,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--metadata-cache",
         default=str(script_dir / "token_metadata_cache.csv"),
         help="CSV cache for token metadata lookups.",
+    )
+    parser.add_argument(
+        "--min-occurrence-count",
+        type=int,
+        default=DEFAULT_MIN_OCCURRENCE_COUNT,
+        help="Discard token addresses that appear fewer than this many times before metadata lookup and output.",
     )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging.")
     return parser.parse_args(argv)
@@ -351,10 +358,12 @@ def main(argv: list[str] | None = None) -> int:
     cache_path = Path(args.metadata_cache).expanduser().resolve()
 
     try:
+        if args.min_occurrence_count < 1:
+            raise ValueError("--min-occurrence-count must be at least 1")
         validate_input_folders(input_folders)
         ensure_parent_directory(output_path, "Output")
         ensure_parent_directory(cache_path, "Metadata cache")
-    except (FileNotFoundError, NotADirectoryError, OSError) as exc:
+    except (FileNotFoundError, NotADirectoryError, OSError, ValueError) as exc:
         logging.error("Path validation failed: %s", exc)
         return 2
 
@@ -362,6 +371,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.info("RPC URL: %s", args.rpc_url)
     logging.info("Output CSV path: %s", output_path)
     logging.info("Metadata cache path: %s", cache_path)
+    logging.info("Minimum token occurrence count: %s", args.min_occurrence_count)
 
     csv_files = discover_token_transfer_csvs(input_folders)
     logging.info("Number of token_transfer CSV files found: %s", len(csv_files))
@@ -375,14 +385,23 @@ def main(argv: list[str] | None = None) -> int:
     logging.info("Number of malformed rows skipped: %s", stats.malformed_rows)
     logging.info("Number of unique token addresses found: %s", len(counts))
 
+    filtered_counts = Counter(
+        {address: count for address, count in counts.items() if count >= args.min_occurrence_count}
+    )
+    logging.info(
+        "Number of token addresses discarded below occurrence threshold: %s",
+        len(counts) - len(filtered_counts),
+    )
+    logging.info("Number of token addresses retained for output: %s", len(filtered_counts))
+
     metadata_cache = load_metadata_cache(cache_path)
     logging.info("Number of metadata entries loaded from cache: %s", len(metadata_cache))
 
-    metadata_cache, rpc_calls = fetch_missing_metadata(counts.keys(), metadata_cache, args.rpc_url)
+    metadata_cache, rpc_calls = fetch_missing_metadata(filtered_counts.keys(), metadata_cache, args.rpc_url)
     logging.info("Number of new metadata RPC calls made: %s", rpc_calls)
 
     write_metadata_cache(cache_path, metadata_cache)
-    write_output(output_path, counts, metadata_cache)
+    write_output(output_path, filtered_counts, metadata_cache)
 
     logging.info("Wrote output CSV: %s", output_path)
     logging.info("Saved metadata cache: %s", cache_path)
