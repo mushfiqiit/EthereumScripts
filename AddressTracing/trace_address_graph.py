@@ -631,7 +631,26 @@ def write_html_graph(discovered_depth: dict[str, int], edges: list[TransferEdge]
         node_addresses.add(edge.source_address)
         node_addresses.add(edge.target_address)
 
-    net = Network(height="1200px", width="100%", directed=True, notebook=False, bgcolor="#ffffff", font_color="#222222")
+    # Use inline pyvis/vis-network resources so address_trace_graph.html is a
+    # single portable file. Pyvis's default local resource mode can produce an
+    # HTML file that points at sibling lib/ assets; if those assets are not
+    # uploaded or served next to the HTML, the browser opens a blank page.
+    try:
+        net = Network(
+            height="1200px",
+            width="100%",
+            directed=True,
+            notebook=False,
+            bgcolor="#ffffff",
+            font_color="#222222",
+            cdn_resources="in_line",
+        )
+    except TypeError:
+        logging.warning(
+            "Installed pyvis version does not support cdn_resources='in_line'; "
+            "generated HTML may require pyvis local asset files next to the HTML."
+        )
+        net = Network(height="1200px", width="100%", directed=True, notebook=False, bgcolor="#ffffff", font_color="#222222")
     net.force_atlas_2based(gravity=-80, central_gravity=0.01, spring_length=260, spring_strength=0.04, damping=0.4, overlap=0.5)
     net.show_buttons(filter_=["physics", "interaction", "layout", "edges", "nodes"])
 
@@ -680,6 +699,22 @@ def write_html_graph(discovered_depth: dict[str, int], edges: list[TransferEdge]
         """
     )
     net.write_html(str(output_path), notebook=False, open_browser=False)
+    warn_if_html_references_local_pyvis_assets(output_path)
+
+
+def warn_if_html_references_local_pyvis_assets(output_path: Path) -> None:
+    try:
+        content = output_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        logging.warning("Could not inspect generated HTML %s: %s", output_path, exc)
+        return
+
+    local_asset_markers = ('src="lib/', "src='lib/", 'href="lib/', "href='lib/")
+    if any(marker in content for marker in local_asset_markers):
+        logging.warning(
+            "Generated HTML references pyvis local lib/ assets. If the graph opens blank, "
+            "copy the generated lib/ folder next to the HTML or upgrade pyvis so inline resources are supported."
+        )
 
 
 def validate_paths(args: argparse.Namespace) -> None:
