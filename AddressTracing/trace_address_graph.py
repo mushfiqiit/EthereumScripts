@@ -691,8 +691,12 @@ def build_static_graph_fallback(discovered_depth: dict[str, int], edges: list[Tr
     preview_node_set = set(node_addresses)
     hidden_node_count = max(0, len(all_node_addresses) - len(node_addresses))
 
-    width = 1400
-    height = 950
+    # Make the static preview physically large and scrollable. The previous
+    # preview fit the whole graph into a small box, making dense rings hard to
+    # inspect. A larger SVG plus in-page zoom controls is more useful for
+    # large radial previews.
+    width = 2200
+    height = 1600
     center_x = width // 2
     center_y = height // 2
     min_radius = 115
@@ -728,8 +732,8 @@ def build_static_graph_fallback(discovered_depth: dict[str, int], edges: list[Tr
         positions[address] = (center_x + min_radius * math.cos(angle), center_y + min_radius * math.sin(angle))
 
     svg_parts = [
-        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Static radial Ethereum address graph preview" '
-        'style="width:100%;max-width:1400px;height:auto;border:1px solid #d0d7de;background:#fff;border-radius:8px;">',
+        f'<svg id="address-trace-radial-svg" viewBox="0 0 {width} {height}" role="img" aria-label="Static radial Ethereum address graph preview" '
+        'style="width:2200px;max-width:none;height:auto;border:1px solid #d0d7de;background:#fff;border-radius:8px;transform-origin:0 0;">',
         '<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">'
         '<polygon points="0 0, 10 3.5, 0 7" fill="#555"></polygon></marker></defs>',
     ]
@@ -810,7 +814,18 @@ def build_static_graph_fallback(discovered_depth: dict[str, int], edges: list[Tr
   </p>
   <p style="margin:0 0 12px 0;"><strong>Nodes:</strong> {len(all_node_addresses)} &nbsp; <strong>Edges:</strong> {len(edges)} &nbsp; <strong>Root:</strong> <code>{html.escape(root)}</code></p>
   <p style="margin:0 0 12px 0; color:#57606a;"><span style="color:#ff6b35;">●</span> root &nbsp; <span style="color:#6baed6;">●</span> address &nbsp; <span style="color:#31a354;">━</span> token transfer &nbsp; <span style="color:#7f7f7f;">━</span> ETH transaction</p>
-  {''.join(svg_parts)}
+  <div id="address-trace-zoom-controls" style="position:sticky;top:0;z-index:10;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px;margin-bottom:8px;background:#ffffff;border:1px solid #d0d7de;border-radius:8px;box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+    <strong>Static preview zoom:</strong>
+    <button type="button" id="address-trace-zoom-out">−</button>
+    <input type="range" id="address-trace-zoom-slider" min="50" max="500" value="100" step="10" style="width:260px;">
+    <button type="button" id="address-trace-zoom-in">+</button>
+    <button type="button" id="address-trace-zoom-reset">Reset</button>
+    <span id="address-trace-zoom-label">100%</span>
+    <span style="color:#57606a;">Use the mouse wheel/trackpad inside the box after zooming, or drag the scrollbars.</span>
+  </div>
+  <div id="address-trace-svg-scroll" style="width:100%;height:78vh;overflow:auto;border:1px solid #d0d7de;border-radius:8px;background:#fff;">
+    {''.join(svg_parts)}
+  </div>
   <details style="margin-top:14px;">
     <summary>First retained edges</summary>
     <table style="border-collapse:collapse;margin-top:10px;background:#fff;">
@@ -821,6 +836,34 @@ def build_static_graph_fallback(discovered_depth: dict[str, int], edges: list[Tr
 </div>
 <script>
 (function() {{
+  function setupStaticPreviewZoom() {{
+    var svg = document.getElementById('address-trace-radial-svg');
+    var slider = document.getElementById('address-trace-zoom-slider');
+    var label = document.getElementById('address-trace-zoom-label');
+    var scrollBox = document.getElementById('address-trace-svg-scroll');
+    if (!svg || !slider || !label) return;
+    function applyZoom(percent) {{
+      percent = Math.max(50, Math.min(500, percent));
+      slider.value = String(percent);
+      label.textContent = percent + '%';
+      var scale = percent / 100;
+      svg.style.transform = 'scale(' + scale + ')';
+      svg.style.marginRight = Math.max(0, (scale - 1) * svg.viewBox.baseVal.width) + 'px';
+      svg.style.marginBottom = Math.max(0, (scale - 1) * svg.viewBox.baseVal.height) + 'px';
+    }}
+    slider.addEventListener('input', function() {{ applyZoom(parseInt(slider.value, 10)); }});
+    document.getElementById('address-trace-zoom-in').addEventListener('click', function() {{ applyZoom(parseInt(slider.value, 10) + 25); }});
+    document.getElementById('address-trace-zoom-out').addEventListener('click', function() {{ applyZoom(parseInt(slider.value, 10) - 25); }});
+    document.getElementById('address-trace-zoom-reset').addEventListener('click', function() {{ applyZoom(100); if (scrollBox) {{ scrollBox.scrollLeft = 0; scrollBox.scrollTop = 0; }} }});
+    if (scrollBox) {{
+      scrollBox.addEventListener('wheel', function(event) {{
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        applyZoom(parseInt(slider.value, 10) + (event.deltaY < 0 ? 25 : -25));
+      }}, {{ passive: false }});
+    }}
+    applyZoom(140);
+  }}
   function fitInteractiveNetwork() {{
     try {{
       if (typeof network !== 'undefined' && network && typeof network.fit === 'function') {{
@@ -831,10 +874,34 @@ def build_static_graph_fallback(discovered_depth: dict[str, int], edges: list[Tr
       console.warn('AddressTracing: interactive pyvis fit failed', error);
     }}
   }}
-  if (document.readyState === 'loading') {{
-    document.addEventListener('DOMContentLoaded', fitInteractiveNetwork);
-  }} else {{
+  function setupInteractiveZoomButtons() {{
+    var networkDiv = document.getElementById('mynetwork');
+    if (!networkDiv || document.getElementById('address-trace-pyvis-controls')) return;
+    var controls = document.createElement('div');
+    controls.id = 'address-trace-pyvis-controls';
+    controls.style.cssText = 'position:sticky;top:0;z-index:10;display:flex;gap:8px;align-items:center;padding:8px;background:#fff;border:1px solid #d0d7de;border-radius:8px;margin:16px;';
+    controls.innerHTML = '<strong>Interactive graph:</strong><button type="button" id="address-trace-pyvis-zoom-in">Zoom in</button><button type="button" id="address-trace-pyvis-zoom-out">Zoom out</button><button type="button" id="address-trace-pyvis-fit">Fit graph</button><span style="color:#57606a;">Mouse wheel and trackpad zoom should also work inside the graph canvas.</span>';
+    networkDiv.parentNode.insertBefore(controls, networkDiv);
+    function zoomBy(multiplier) {{
+      try {{
+        if (typeof network === 'undefined' || !network) return;
+        var scale = network.getScale ? network.getScale() : 1;
+        network.moveTo({{ scale: Math.max(0.02, Math.min(20, scale * multiplier)), animation: true }});
+      }} catch (error) {{ console.warn('AddressTracing: pyvis zoom failed', error); }}
+    }}
+    document.getElementById('address-trace-pyvis-zoom-in').addEventListener('click', function() {{ zoomBy(1.35); }});
+    document.getElementById('address-trace-pyvis-zoom-out').addEventListener('click', function() {{ zoomBy(0.75); }});
+    document.getElementById('address-trace-pyvis-fit').addEventListener('click', function() {{ if (typeof network !== 'undefined' && network && network.fit) network.fit({{animation: true}}); }});
+  }}
+  function initializeAddressTraceView() {{
+    setupStaticPreviewZoom();
     fitInteractiveNetwork();
+    setupInteractiveZoomButtons();
+  }}
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', initializeAddressTraceView);
+  }} else {{
+    initializeAddressTraceView();
   }}
 }})();
 </script>
@@ -886,7 +953,7 @@ def write_html_graph(discovered_depth: dict[str, int], edges: list[TransferEdge]
     # uploaded or served next to the HTML, the browser opens a blank page.
     try:
         net = Network(
-            height="1200px",
+            height="85vh",
             width="100%",
             directed=True,
             notebook=False,
@@ -899,7 +966,7 @@ def write_html_graph(discovered_depth: dict[str, int], edges: list[TransferEdge]
             "Installed pyvis version does not support cdn_resources='in_line'; "
             "generated HTML may require pyvis local asset files next to the HTML."
         )
-        net = Network(height="1200px", width="100%", directed=True, notebook=False, bgcolor="#ffffff", font_color="#222222")
+        net = Network(height="85vh", width="100%", directed=True, notebook=False, bgcolor="#ffffff", font_color="#222222")
     net.force_atlas_2based(gravity=-80, central_gravity=0.01, spring_length=260, spring_strength=0.04, damping=0.4, overlap=0.5)
     net.show_buttons(filter_=["physics", "interaction", "layout", "edges", "nodes"])
 
