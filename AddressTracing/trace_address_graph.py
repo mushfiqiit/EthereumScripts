@@ -14,6 +14,7 @@ import argparse
 import csv
 import html
 import logging
+import math
 import re
 import sqlite3
 import sys
@@ -668,73 +669,122 @@ def edge_title(edge: TransferEdge) -> str:
 
 
 def build_static_graph_fallback(discovered_depth: dict[str, int], edges: list[TransferEdge], root: str) -> str:
-    """Build a dependency-free SVG/list fallback so the HTML never looks blank.
+    """Build a dependency-free radial SVG/list fallback so HTML never looks blank.
 
     Pyvis provides the interactive graph, but browser security settings, old pyvis
     versions, missing local assets, or GitHub's normal source viewer can prevent
     the JavaScript graph from rendering. This fallback is intentionally plain
-    HTML/SVG and remains visible above the interactive canvas.
+    HTML/SVG and lays nodes out in depth rings rather than one long column.
     """
-    node_addresses = sorted(
+    max_preview_nodes = 350
+    max_preview_edges = 600
+    all_node_addresses = sorted(
         set(discovered_depth)
         | {edge.source_address for edge in edges}
         | {edge.target_address for edge in edges},
         key=lambda item: (discovered_depth.get(item, sys.maxsize), item),
     )
-    if not node_addresses:
+    if not all_node_addresses:
         return ""
 
-    width = 1100
-    height = max(260, 140 + 90 * len(node_addresses))
-    x_left = 130
-    x_right = width - 190
-    root_y = 90
-    positions: dict[str, tuple[int, int]] = {root: (x_left, root_y)}
-    others = [address for address in node_addresses if address != root]
-    for index, address in enumerate(others):
-        positions[address] = (x_right, 90 + index * 90)
+    node_addresses = all_node_addresses[:max_preview_nodes]
+    preview_node_set = set(node_addresses)
+    hidden_node_count = max(0, len(all_node_addresses) - len(node_addresses))
+
+    width = 1400
+    height = 950
+    center_x = width // 2
+    center_y = height // 2
+    min_radius = 115
+    max_radius = min(width, height) // 2 - 90
+
+    nodes_by_depth: dict[int, list[str]] = {}
+    for address in node_addresses:
+        depth = discovered_depth.get(address, max(discovered_depth.values(), default=0) + 1)
+        nodes_by_depth.setdefault(depth, []).append(address)
+
+    sorted_depths = sorted(nodes_by_depth)
+    depth_to_ring: dict[int, int] = {depth: index for index, depth in enumerate(sorted_depths)}
+    ring_count = max(1, len(sorted_depths) - 1)
+    positions: dict[str, tuple[float, float]] = {}
+    if root in preview_node_set:
+        positions[root] = (center_x, center_y)
+
+    for depth in sorted_depths:
+        addresses = [address for address in nodes_by_depth[depth] if address != root]
+        if not addresses:
+            continue
+        ring_index = max(1, depth_to_ring[depth])
+        radius = min(max_radius, min_radius + (max_radius - min_radius) * ring_index / max(1, ring_count))
+        angle_offset = (math.pi / len(addresses)) if depth % 2 else 0.0
+        for index, address in enumerate(addresses):
+            angle = angle_offset + (2 * math.pi * index / len(addresses))
+            positions[address] = (center_x + radius * math.cos(angle), center_y + radius * math.sin(angle))
+
+    # If all nodes were at depth 0 except the root, distribute them on one ring.
+    missing_positions = [address for address in node_addresses if address not in positions]
+    for index, address in enumerate(missing_positions):
+        angle = 2 * math.pi * index / max(1, len(missing_positions))
+        positions[address] = (center_x + min_radius * math.cos(angle), center_y + min_radius * math.sin(angle))
 
     svg_parts = [
-        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Static Ethereum address graph preview" '
-        'style="width:100%;max-width:1200px;height:auto;border:1px solid #d0d7de;background:#fff;border-radius:8px;">',
+        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Static radial Ethereum address graph preview" '
+        'style="width:100%;max-width:1400px;height:auto;border:1px solid #d0d7de;background:#fff;border-radius:8px;">',
         '<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">'
         '<polygon points="0 0, 10 3.5, 0 7" fill="#555"></polygon></marker></defs>',
     ]
+
+    for depth in sorted_depths:
+        if depth == 0:
+            continue
+        ring_index = max(1, depth_to_ring[depth])
+        radius = min(max_radius, min_radius + (max_radius - min_radius) * ring_index / max(1, ring_count))
+        svg_parts.append(
+            f'<circle cx="{center_x}" cy="{center_y}" r="{radius:.1f}" fill="none" '
+            'stroke="#d8dee4" stroke-dasharray="8 8" stroke-width="1"></circle>'
+        )
+        svg_parts.append(
+            f'<text x="{center_x + radius + 8:.1f}" y="{center_y - 8}" font-size="12" fill="#57606a">'
+            f'depth {html.escape(str(depth))}</text>'
+        )
+
     rendered_edge_count = 0
-    for edge in edges[:200]:
+    for edge in edges[:max_preview_edges]:
         source_pos = positions.get(edge.source_address)
         target_pos = positions.get(edge.target_address)
         if source_pos is None or target_pos is None:
             continue
         sx, sy = source_pos
         tx, ty = target_pos
-        label_x = (sx + tx) // 2
-        label_y = (sy + ty) // 2 - 8
         stroke = "#31a354" if edge.source_type == "token_transfer" else "#7f7f7f"
         svg_parts.append(
-            f'<line x1="{sx + 48}" y1="{sy}" x2="{tx - 48}" y2="{ty}" '
-            f'stroke="{stroke}" stroke-width="2" marker-end="url(#arrowhead)"></line>'
-        )
-        svg_parts.append(
-            f'<text x="{label_x}" y="{label_y}" text-anchor="middle" font-size="13" fill="#24292f">'
-            f'{html.escape(str(edge.block_number))}, {html.escape(edge.transfer_value_label)}</text>'
+            f'<line x1="{sx:.1f}" y1="{sy:.1f}" x2="{tx:.1f}" y2="{ty:.1f}" '
+            f'stroke="{stroke}" stroke-opacity="0.45" stroke-width="1.6" marker-end="url(#arrowhead)"></line>'
         )
         rendered_edge_count += 1
 
     for address in node_addresses:
         x, y = positions[address]
         is_root = address == root
+        total_degree = sum(1 for edge in edges if edge.source_address == address or edge.target_address == address)
         fill = "#ff6b35" if is_root else "#6baed6"
+        radius = 24 if is_root else max(8, min(18, 8 + math.sqrt(total_degree)))
         label = f"ROOT: {short_address(address)}" if is_root else short_address(address)
-        svg_parts.append(f'<circle cx="{x}" cy="{y}" r="34" fill="{fill}" stroke="#24292f" stroke-width="2"></circle>')
         svg_parts.append(
-            f'<text x="{x}" y="{y + 54}" text-anchor="middle" font-size="14" fill="#24292f">'
-            f'{html.escape(label)}</text>'
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius}" fill="{fill}" '
+            'stroke="#24292f" stroke-width="1.5"></circle>'
         )
-    if len(edges) > rendered_edge_count:
+        # Label root and the highest-degree non-root nodes; too many labels make the preview unreadable.
+        if is_root or total_degree >= 2 or len(node_addresses) <= 40:
+            svg_parts.append(
+                f'<text x="{x:.1f}" y="{y + radius + 14:.1f}" text-anchor="middle" font-size="12" fill="#24292f">'
+                f'{html.escape(label)}</text>'
+            )
+
+    if hidden_node_count or len(edges) > rendered_edge_count:
         svg_parts.append(
-            f'<text x="{width // 2}" y="{height - 24}" text-anchor="middle" font-size="13" fill="#57606a">'
-            f'Static preview rendered {rendered_edge_count} of {len(edges)} edges; use CSV outputs for all edges.</text>'
+            f'<text x="{center_x}" y="{height - 24}" text-anchor="middle" font-size="13" fill="#57606a">'
+            f'Preview rendered {len(node_addresses)} of {len(all_node_addresses)} nodes and {rendered_edge_count} of {len(edges)} edges; CSV outputs contain the full graph.</text>'
         )
     svg_parts.append("</svg>")
 
@@ -756,9 +806,10 @@ def build_static_graph_fallback(discovered_depth: dict[str, int], edges: list[Tr
 <div id="address-trace-static-fallback" style="font-family:Arial, sans-serif; margin:16px; padding:16px; border:1px solid #d0d7de; border-radius:10px; background:#f6f8fa;">
   <h2 style="margin-top:0;">Address trace graph preview</h2>
   <p style="margin:0 0 10px 0; color:#57606a;">
-    This static SVG preview is always rendered. The interactive pyvis graph is below it. If the interactive graph area is blank, the browser did not load or execute the pyvis/vis-network JavaScript, but the graph data was generated.
+    This radial SVG preview is always rendered and groups nodes by BFS depth rings around the root. The interactive pyvis graph is below it. If the interactive graph area is blank, the browser did not load or execute pyvis/vis-network JavaScript, but graph data was generated.
   </p>
-  <p style="margin:0 0 12px 0;"><strong>Nodes:</strong> {len(node_addresses)} &nbsp; <strong>Edges:</strong> {len(edges)} &nbsp; <strong>Root:</strong> <code>{html.escape(root)}</code></p>
+  <p style="margin:0 0 12px 0;"><strong>Nodes:</strong> {len(all_node_addresses)} &nbsp; <strong>Edges:</strong> {len(edges)} &nbsp; <strong>Root:</strong> <code>{html.escape(root)}</code></p>
+  <p style="margin:0 0 12px 0; color:#57606a;"><span style="color:#ff6b35;">●</span> root &nbsp; <span style="color:#6baed6;">●</span> address &nbsp; <span style="color:#31a354;">━</span> token transfer &nbsp; <span style="color:#7f7f7f;">━</span> ETH transaction</p>
   {''.join(svg_parts)}
   <details style="margin-top:14px;">
     <summary>First retained edges</summary>
@@ -866,7 +917,7 @@ def write_html_graph(discovered_depth: dict[str, int], edges: list[TransferEdge]
                 f"<b>In degree</b>: {indeg}<br><b>Out degree</b>: {outdeg}<br><b>Total degree</b>: {total}"
             ),
             color="#ff6b35" if is_root else "#6baed6",
-            size=34 if is_root else max(12, min(30, 12 + total)),
+            size=28 if is_root else max(10, min(22, 10 + math.sqrt(total))),
             borderWidth=4 if is_root else 1,
         )
 
@@ -874,24 +925,25 @@ def write_html_graph(discovered_depth: dict[str, int], edges: list[TransferEdge]
         net.add_edge(
             edge.source_address,
             edge.target_address,
-            label=f"{edge.block_number}, {edge.transfer_value_label}",
+            label=f"{edge.block_number}, {edge.transfer_value_label}" if len(edges) <= 250 else "",
             title=edge_title(edge),
             arrows="to",
-            smooth={"enabled": True, "type": "dynamic"},
+            smooth={"enabled": True, "type": "continuous", "roundness": 0.25},
             color="#7f7f7f" if edge.source_type == "transaction" else "#31a354",
         )
 
     net.set_options(
         """
         {
-          "interaction": {"hover": true, "navigationButtons": true, "keyboard": true, "dragNodes": true, "dragView": true, "zoomView": true},
-          "edges": {"font": {"size": 11, "align": "middle"}, "arrows": {"to": {"enabled": true, "scaleFactor": 0.8}}},
-          "nodes": {"font": {"size": 15}},
+          "interaction": {"hover": true, "navigationButtons": true, "keyboard": true, "dragNodes": true, "dragView": true, "zoomView": true, "hideEdgesOnDrag": true},
+          "edges": {"font": {"size": 9, "align": "middle", "strokeWidth": 2}, "arrows": {"to": {"enabled": true, "scaleFactor": 0.55}}, "smooth": {"enabled": true, "type": "continuous", "roundness": 0.25}},
+          "nodes": {"font": {"size": 11, "strokeWidth": 3}, "shape": "dot"},
           "physics": {
             "enabled": true,
-            "solver": "forceAtlas2Based",
-            "stabilization": {"enabled": true, "iterations": 250, "updateInterval": 25},
-            "forceAtlas2Based": {"gravitationalConstant": -80, "centralGravity": 0.01, "springLength": 260, "springConstant": 0.04, "damping": 0.4, "avoidOverlap": 0.5}
+            "solver": "barnesHut",
+            "stabilization": {"enabled": true, "iterations": 600, "updateInterval": 25, "fit": true},
+            "barnesHut": {"gravitationalConstant": -12000, "centralGravity": 0.08, "springLength": 180, "springConstant": 0.025, "damping": 0.2, "avoidOverlap": 0.8},
+            "minVelocity": 0.75
           }
         }
         """
