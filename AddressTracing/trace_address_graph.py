@@ -55,6 +55,14 @@ EDGE_CSV_COLUMNS = [
 ]
 NODE_CSV_COLUMNS = ["address", "is_root", "discovery_depth", "in_degree", "out_degree", "total_degree"]
 
+# Conservative default caps keep accidental full-component traversals from
+# running indefinitely or producing HTML files too large for a browser. Use
+# --no-limits for intentionally unbounded research runs, or override individual
+# values with --max-depth/--max-nodes/--max-edges.
+DEFAULT_MAX_DEPTH = 4
+DEFAULT_MAX_NODES = 2_000
+DEFAULT_MAX_EDGES = 10_000
+
 
 @dataclass(frozen=True)
 class TokenMetadata:
@@ -108,6 +116,7 @@ class TraceStats:
     unknown_transfer_value_edges: int = 0
     missing_csv_files: int = 0
     skipped_min_usd_edges: int = 0
+    skipped_unknown_usd_edges: int = 0
     skipped_max_node_edges: int = 0
     duplicate_edges: int = 0
     enqueued_addresses: int = 0
@@ -141,12 +150,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-html", required=True, help="Interactive HTML graph output path.")
     parser.add_argument("--output-edges-csv", required=True, help="Machine-readable edge CSV output path.")
     parser.add_argument("--output-nodes-csv", required=True, help="Machine-readable node CSV output path.")
-    parser.add_argument("--max-depth", type=int, default=None, help="Maximum BFS depth from root. Omit for full traversal.")
-    parser.add_argument("--max-nodes", type=int, default=None, help="Maximum nodes to discover. Omit for no node limit.")
-    parser.add_argument("--max-edges", type=int, default=None, help="Maximum edges to discover. Omit for no edge limit.")
-    parser.add_argument("--min-usd-value", type=Decimal, default=None, help="Only include edges with known USD value at or above this amount. Unknown token values are still included.")
+    parser.add_argument("--max-depth", type=int, default=DEFAULT_MAX_DEPTH, help="Maximum BFS depth from root. Use --no-limits for no depth cap.")
+    parser.add_argument("--max-nodes", type=int, default=DEFAULT_MAX_NODES, help="Maximum nodes to discover. Use --no-limits for no node cap.")
+    parser.add_argument("--max-edges", type=int, default=DEFAULT_MAX_EDGES, help="Maximum edges to discover. Use --no-limits for no edge cap.")
+    parser.add_argument("--no-limits", action="store_true", help="Disable default traversal caps. Use carefully: connected components can become huge.")
+    parser.add_argument(
+        "--min-usd-value",
+        "--min-usd",
+        dest="min_usd_value",
+        type=Decimal,
+        default=None,
+        help="Only include edges with known USD value at or above this amount. Unknown token values are included unless --exclude-unknown-usd is set.",
+    )
+    parser.add_argument(
+        "--exclude-unknown-usd",
+        action="store_true",
+        help="When --min-usd-value/--min-usd is set, drop token-transfer edges whose USD value is unknown.",
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging.")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.no_limits:
+        args.max_depth = None
+        args.max_nodes = None
+        args.max_edges = None
+    return args
 
 
 def configure_logging(verbose: bool) -> None:
@@ -428,11 +455,18 @@ def token_transfer_edge(row: dict[str, str], csv_file: Path | None, token_metada
     )
 
 
-def passes_min_usd(edge: TransferEdge, min_usd_value: Decimal | None) -> bool:
-    if min_usd_value is None or edge.transfer_value_USD == "":
-        return True
+def min_usd_filter_reason(edge: TransferEdge, min_usd_value: Decimal | None, exclude_unknown_usd: bool) -> str | None:
+    """Return a skip reason for the min-USD filter, or None when the edge passes."""
+    if min_usd_value is None:
+        return None
+    if edge.transfer_value_USD == "":
+        return "unknown_usd" if exclude_unknown_usd else None
     value = parse_decimal(edge.transfer_value_USD)
-    return value is not None and value >= min_usd_value
+    if value is None:
+        return "unknown_usd" if exclude_unknown_usd else None
+    if value < min_usd_value:
+        return "below_min_usd"
+    return None
 
 
 def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: dict[str, TokenMetadata]) -> tuple[dict[str, int], list[TransferEdge], TraceStats]:
@@ -442,6 +476,13 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
 
     if args.max_depth is None or args.max_nodes is None or args.max_edges is None:
         logging.warning("One or more traversal safety limits are unset. Full connected-component traversal may become very large.")
+    else:
+        logging.info(
+            "Traversal safety limits active: max_depth=%s max_nodes=%s max_edges=%s",
+            args.max_depth,
+            args.max_nodes,
+            args.max_edges,
+        )
 
     stats = TraceStats()
     address_block_cache: dict[str, set[int]] = {}
@@ -470,6 +511,7 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
         starting_nodes = len(discovered_depth)
         starting_duplicates = stats.duplicate_edges
         starting_min_usd_skips = stats.skipped_min_usd_edges
+        starting_unknown_usd_skips = stats.skipped_unknown_usd_edges
         starting_max_node_skips = stats.skipped_max_node_edges
         starting_enqueued = stats.enqueued_addresses
 
@@ -504,8 +546,14 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
                     candidate_edges.append(edge)
 
             for edge in candidate_edges:
-                if not passes_min_usd(edge, args.min_usd_value):
+                min_usd_skip_reason = min_usd_filter_reason(
+                    edge, args.min_usd_value, args.exclude_unknown_usd
+                )
+                if min_usd_skip_reason == "below_min_usd":
                     stats.skipped_min_usd_edges += 1
+                    continue
+                if min_usd_skip_reason == "unknown_usd":
+                    stats.skipped_unknown_usd_edges += 1
                     continue
                 key = edge.duplicate_key()
                 if key in edge_keys:
@@ -523,6 +571,8 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
                 ]
                 if args.max_nodes is not None and len(discovered_depth) + len(set(missing_endpoints)) > args.max_nodes:
                     stats.skipped_max_node_edges += 1
+                    if stats.traversal_stop_reason == "queue exhausted":
+                        stats.traversal_stop_reason = f"--max-nodes={args.max_nodes} reached"
                     continue
                 for address in missing_endpoints:
                     discovered_depth[address] = depth + 1
@@ -545,7 +595,7 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
 
         logging.info(
             "Finished %s depth=%s: added_edges=%s added_nodes=%s enqueued_neighbors=%s "
-            "duplicates_seen=%s min_usd_skips=%s max_node_skips=%s remaining_queue=%s",
+            "duplicates_seen=%s min_usd_skips=%s unknown_usd_skips=%s max_node_skips=%s remaining_queue=%s",
             short_address(current),
             depth,
             len(edges) - starting_edges,
@@ -553,6 +603,7 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
             stats.enqueued_addresses - starting_enqueued,
             stats.duplicate_edges - starting_duplicates,
             stats.skipped_min_usd_edges - starting_min_usd_skips,
+            stats.skipped_unknown_usd_edges - starting_unknown_usd_skips,
             stats.skipped_max_node_edges - starting_max_node_skips,
             len(queue),
         )
@@ -866,6 +917,11 @@ def warn_if_html_references_local_pyvis_assets(output_path: Path) -> None:
 
 
 def validate_paths(args: argparse.Namespace) -> None:
+    for option_name in ("max_depth", "max_nodes", "max_edges"):
+        option_value = getattr(args, option_name)
+        if option_value is not None and option_value < 0:
+            raise SystemExit(f"--{option_name.replace('_', '-')} must be non-negative")
+
     data_base_dir = Path(args.data_base_dir)
     index_base_dir = Path(args.index_base_dir)
     if not data_base_dir.is_dir():
@@ -910,7 +966,8 @@ def main(argv: list[str] | None = None) -> int:
     logging.info("Graph edges discovered: %s", len(edges))
     logging.info("Unknown transfer-value edges: %s", stats.unknown_transfer_value_edges)
     logging.info("Duplicate edges skipped: %s", stats.duplicate_edges)
-    logging.info("Edges skipped by --min-usd-value: %s", stats.skipped_min_usd_edges)
+    logging.info("Edges skipped below --min-usd-value/--min-usd: %s", stats.skipped_min_usd_edges)
+    logging.info("Unknown-USD edges skipped by --exclude-unknown-usd: %s", stats.skipped_unknown_usd_edges)
     logging.info("Edges skipped by --max-nodes: %s", stats.skipped_max_node_edges)
     logging.info("Addresses enqueued for BFS: %s", stats.enqueued_addresses)
     logging.info("Traversal stop reason: %s", stats.traversal_stop_reason)
