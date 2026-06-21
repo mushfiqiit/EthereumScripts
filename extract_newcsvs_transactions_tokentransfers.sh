@@ -55,6 +55,24 @@ require_value() {
   [[ -n "$value" ]] || die "${option} requires a value."
 }
 
+ensure_non_empty_csv() {
+  local csv_file="$1"
+  local header="$2"
+  local item_name="$3"
+  local block="$4"
+
+  if [[ -s "$csv_file" ]]; then
+    return
+  fi
+
+  printf '%s\n' "$header" > "$csv_file" ||
+    die "could not write ${item_name} CSV header for block ${block}: ${csv_file}"
+  echo "      ${item_name} export for block ${block} contained 0 rows; wrote header-only CSV."
+}
+
+readonly TRANSACTION_CSV_HEADER="hash,nonce,block_hash,block_number,transaction_index,from_address,to_address,value,gas,gas_price,input,block_timestamp,max_fee_per_gas,max_priority_fee_per_gas,transaction_type"
+readonly TOKEN_TRANSFER_CSV_HEADER="token_address,from_address,to_address,value,transaction_hash,log_index,block_number"
+
 while (( $# > 0 )); do
   case "$1" in
     --start-block)
@@ -179,8 +197,7 @@ for ((outer_start=GLOBAL_START_BLOCK; outer_start<=GLOBAL_END_BLOCK; outer_start
           die "transaction export failed for block ${block}; output file: ${tx_file}"
         fi
         rm -f "$blocks_file"
-        [[ -s "$tx_file" ]] ||
-          die "transaction export for block ${block} produced an empty file: ${tx_file}"
+        ensure_non_empty_csv "$tx_file" "$TRANSACTION_CSV_HEADER" "transaction" "$block"
       fi
 
       if [[ -s "$tt_file" ]]; then
@@ -198,8 +215,7 @@ for ((outer_start=GLOBAL_START_BLOCK; outer_start<=GLOBAL_END_BLOCK; outer_start
           rm -f "$tt_file"
           die "token_transfer export failed for block ${block}; output file: ${tt_file}"
         fi
-        [[ -s "$tt_file" ]] ||
-          die "token_transfer export for block ${block} produced an empty file: ${tt_file}"
+        ensure_non_empty_csv "$tt_file" "$TOKEN_TRANSFER_CSV_HEADER" "token_transfer" "$block"
       fi
     done
   done
