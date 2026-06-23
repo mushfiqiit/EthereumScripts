@@ -31,7 +31,24 @@ TO_KEYS = ("to_address", "to")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build SQLite address indexes from Transaction_TokenTransfer folders."
+        description="Build SQLite address indexes from Transaction_TokenTransfer folders.",
+        epilog=(
+            "Example for CSVs produced by extract_newcsvs_transactions_tokentransfers.sh:\n"
+            "  python3 build_address_index.py \\\n"
+            "    --root '/media/dheeman/Seagate Backup Plus Drive1/EthereumCode_Mushfiq/EthereumScripts/NewCSVs/Ethereum_TT_25307601_25314800' \\\n"
+            "    --output './AddressIndexes/Ethereum_TT_25307601_25314800'\n\n"
+            "Pass the 7200-block Ethereum_TT_* parent directory to --root, not an individual "
+            "Transaction_TokenTransfer_* folder or token_transfer_*.csv file."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--root",
+        required=True,
+        help=(
+            "7200-block parent folder containing Transaction_TokenTransfer_* subfolders, "
+            "e.g. Ethereum_TT_25307601_25314800"
+        ),
     )
     parser.add_argument("--root", required=True, help="Root folder, e.g. Ethereum_TT_25112101_25119300")
     parser.add_argument("--output", required=True, help="Output directory for .sqlite index files")
