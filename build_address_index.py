@@ -50,7 +50,6 @@ def parse_args() -> argparse.Namespace:
             "e.g. Ethereum_TT_25307601_25314800"
         ),
     )
-    parser.add_argument("--root", required=True, help="Root folder, e.g. Ethereum_TT_25112101_25119300")
     parser.add_argument("--output", required=True, help="Output directory for .sqlite index files")
     parser.add_argument("--batch-size", type=int, default=5000, help="Insert batch size for executemany")
     parser.add_argument("--commit-every", type=int, default=20000, help="Commit every N inserted rows")

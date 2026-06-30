@@ -500,7 +500,7 @@ def trace_graph(args: argparse.Namespace, db_files: list[Path], token_metadata: 
         current, depth = queue.popleft()
         if current in queried_addresses:
             continue
-        if args.max_depth is not None and depth > args.max_depth:
+        if args.max_depth is not None and depth >= args.max_depth:
             continue
         queried_addresses.add(current)
 

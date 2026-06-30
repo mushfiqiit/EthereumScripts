@@ -13,6 +13,14 @@ NEO4J_DATABASE="${NEO4J_DATABASE:-neo4j}"
 OPEN_BROWSER="${OPEN_BROWSER:-1}"
 KEEP_EXISTING="${KEEP_EXISTING:-0}"
 
+if [[ "$(pwd -P)" == "${SCRIPT_DIR}" ]]; then
+  RUN_COMMAND="bash ./run_sample_neo4j_graph.sh"
+elif [[ "$(pwd -P)" == "${REPO_ROOT}" ]]; then
+  RUN_COMMAND="bash SampleNeo4j/run_sample_neo4j_graph.sh"
+else
+  RUN_COMMAND="bash ${SCRIPT_DIR}/run_sample_neo4j_graph.sh"
+fi
+
 usage() {
   cat <<USAGE
 Usage: NEO4J_PASSWORD=<password> $0 [--keep-existing] [--no-open] [--output PATH]
@@ -23,7 +31,7 @@ loads a small demo graph into Neo4j, and exports an interactive HTML graph.
 Environment variables:
   NEO4J_URI       Bolt URI, default: bolt://localhost:7687
   NEO4J_USER      Neo4j username, default: neo4j
-  NEO4J_PASSWORD  Neo4j password, required
+  NEO4J_PASSWORD  Neo4j password; prompted when omitted in an interactive terminal
   NEO4J_DATABASE  Neo4j database, default: neo4j
   VENV_DIR        Virtualenv directory, default: .venv-sample-neo4j
   OUTPUT_HTML     HTML output path, default: SampleNeo4j/sample_neo4j_graph.html
@@ -63,15 +71,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${NEO4J_PASSWORD:-}" ]]; then
-  cat >&2 <<'ERROR'
-Error: NEO4J_PASSWORD is required.
+  if [[ -t 0 && -t 2 ]]; then
+    read -r -s -p "Neo4j password for ${NEO4J_USER}@${NEO4J_URI}: " NEO4J_PASSWORD
+    echo >&2
+  else
+    cat >&2 <<ERROR
+Error: NEO4J_PASSWORD is not set and this shell is not interactive.
 
-Start Neo4j first, then run for example:
+Neo4j is running, but the Python driver still needs your database password to
+log in over Bolt. Start Neo4j first, then run for example:
   export NEO4J_PASSWORD='your-password'
-  bash SampleNeo4j/run_sample_neo4j_graph.sh
+  ${RUN_COMMAND}
 ERROR
-  exit 1
+    exit 1
+  fi
 fi
+export NEO4J_PASSWORD
 
 if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
   echo "Error: ${PYTHON_BIN} was not found. Install Python 3 or set PYTHON_BIN." >&2
@@ -87,23 +102,23 @@ source "${VENV_DIR}/bin/activate"
 python -m pip install --upgrade pip
 python -m pip install -r "${SCRIPT_DIR}/requirements.txt"
 
-KEEP_ARGS=()
 if [[ "${KEEP_EXISTING}" =~ ^(1|true|TRUE|yes|YES|on|ON)$ ]]; then
-  KEEP_ARGS+=(--keep-existing)
+  python "${SCRIPT_DIR}/load_sample_graph.py" \
+    --uri "${NEO4J_URI}" \
+    --user "${NEO4J_USER}" \
+    --database "${NEO4J_DATABASE}" \
+    --keep-existing
+else
+  python "${SCRIPT_DIR}/load_sample_graph.py" \
+    --uri "${NEO4J_URI}" \
+    --user "${NEO4J_USER}" \
+    --database "${NEO4J_DATABASE}"
 fi
-
-python "${SCRIPT_DIR}/load_sample_graph.py" \
-  --uri "${NEO4J_URI}" \
-  --user "${NEO4J_USER}" \
-  --database "${NEO4J_DATABASE}" \
-  --password "${NEO4J_PASSWORD}" \
-  "${KEEP_ARGS[@]}"
 
 python "${SCRIPT_DIR}/export_sample_graph_html.py" \
   --uri "${NEO4J_URI}" \
   --user "${NEO4J_USER}" \
   --database "${NEO4J_DATABASE}" \
-  --password "${NEO4J_PASSWORD}" \
   --output "${OUTPUT_HTML}"
 
 cat <<DONE
