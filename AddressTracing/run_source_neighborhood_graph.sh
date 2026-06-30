@@ -23,6 +23,8 @@ Common options passed through to Python:
   --start-block N --end-block N
   --output-dir PATH
   --output-prefix NAME
+  --output-json PATH
+  --skip-html              Write portable JSON/CSV only for transfer to another machine
   --max-depth N             Default: 5
   --max-nodes N             Default: 5000
   --max-edges N             Default: 25000
