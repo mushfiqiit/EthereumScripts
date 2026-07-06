@@ -277,6 +277,7 @@ if [[ "$GENERATE_HTML" == true ]]; then
       margin: 0;
       background: #111827;
       color: #f9fafb;
+      overflow: auto;
     }
     header {
       padding: 16px 20px;
@@ -292,8 +293,8 @@ if [[ "$GENERATE_HTML" == true ]]; then
       color: #cbd5e1;
     }
     #graph {
-      width: 100vw;
-      height: calc(100vh - 86px);
+      width: max(1600px, 100vw);
+      height: 1050px;
       display: block;
       cursor: grab;
       background:
@@ -349,7 +350,7 @@ if [[ "$GENERATE_HTML" == true ]]; then
 <body>
   <header>
     <h1>Neo4j Ethereum Sample Graph</h1>
-    <p>Standalone interactive HTML export. Drag nodes to rearrange the graph. This file contains only sample data.</p>
+    <p>Standalone interactive HTML export. Drag nodes to rearrange the graph. Scroll horizontally/vertically to view the full canvas. This file contains only sample data.</p>
   </header>
   <svg id="graph" role="img" aria-label="Interactive Ethereum-like graph visualization">
     <defs>
@@ -540,6 +541,8 @@ cat <<INFO
 
 Open Neo4j Browser:
   http://localhost:7474
+
+Open the generated HTML file in a browser and use the browser scrollbars to see the full graph canvas.
 
 If you want a visual graph view in Neo4j Browser, paste the same query into
 the Neo4j Browser query editor, not into the Bash terminal:
