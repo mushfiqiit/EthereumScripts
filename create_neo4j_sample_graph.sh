@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Create a small Ethereum-like sample graph in a local Neo4j database so it can
+# Create a larger Ethereum-like sample graph in a local Neo4j database so it can
 # be visualized in Neo4j Browser at http://localhost:7474.
 
 NEO4J_URI="${NEO4J_URI:-bolt://localhost:7687}"
@@ -18,7 +18,7 @@ usage() {
 Usage:
   ./create_neo4j_sample_graph.sh [options]
 
-Creates a tiny Ethereum-like graph in Neo4j for browser visualization.
+Creates a larger Ethereum-like graph in Neo4j for browser visualization.
 
 Options:
   --uri URI          Bolt URI (default: bolt://localhost:7687, or NEO4J_URI)
@@ -144,8 +144,30 @@ MERGE (carol:SampleAddress {address: '0xcarol00000000000000000000000000000000003
   SET carol.name = 'Carol Wallet'
 MERGE (dex:SampleAddress {address: '0xdex0000000000000000000000000000000000004'})
   SET dex.name = 'Sample DEX Contract'
+MERGE (dave:SampleAddress {address: '0xdave000000000000000000000000000000000006'})
+  SET dave.name = 'Dave Wallet'
+MERGE (erin:SampleAddress {address: '0xerin000000000000000000000000000000000007'})
+  SET erin.name = 'Erin Wallet'
+MERGE (frank:SampleAddress {address: '0xfrank0000000000000000000000000000000008'})
+  SET frank.name = 'Frank Wallet'
+MERGE (grace:SampleAddress {address: '0xgrace000000000000000000000000000000009'})
+  SET grace.name = 'Grace Wallet'
+MERGE (heidi:SampleAddress {address: '0xheidi000000000000000000000000000000000a'})
+  SET heidi.name = 'Heidi Wallet'
+MERGE (bridge:SampleAddress {address: '0xbridge00000000000000000000000000000000b'})
+  SET bridge.name = 'Sample Bridge Contract'
+MERGE (staking:SampleAddress {address: '0xstaking0000000000000000000000000000000c'})
+  SET staking.name = 'Sample Staking Contract'
+MERGE (market:SampleAddress {address: '0xmarket00000000000000000000000000000000d'})
+  SET market.name = 'Sample NFT Marketplace'
+MERGE (miner:SampleAddress {address: '0xminer000000000000000000000000000000000e'})
+  SET miner.name = 'Sample Miner/Validator'
 MERGE (token:SampleToken {address: '0xtoken00000000000000000000000000000000005'})
   SET token.symbol = 'SAMP', token.name = 'Sample Token'
+MERGE (usdc:SampleToken {address: '0xusdc0000000000000000000000000000000000f'})
+  SET usdc.symbol = 'USDC', usdc.name = 'Sample USD Coin'
+MERGE (nft:SampleToken {address: '0xnft000000000000000000000000000000000010'})
+  SET nft.symbol = 'SNFT', nft.name = 'Sample NFT Collection'
 
 MERGE (tx1:SampleTransaction {hash: '0xtxsample001'})
   SET tx1.block_number = 25415601, tx1.value_eth = 1.25
@@ -153,6 +175,24 @@ MERGE (tx2:SampleTransaction {hash: '0xtxsample002'})
   SET tx2.block_number = 25415642, tx2.value_eth = 0.40
 MERGE (tx3:SampleTransaction {hash: '0xtxsample003'})
   SET tx3.block_number = 25415710, tx3.value_eth = 0.00
+MERGE (tx4:SampleTransaction {hash: '0xtxsample004'})
+  SET tx4.block_number = 25415788, tx4.value_eth = 3.20
+MERGE (tx5:SampleTransaction {hash: '0xtxsample005'})
+  SET tx5.block_number = 25415803, tx5.value_eth = 0.75
+MERGE (tx6:SampleTransaction {hash: '0xtxsample006'})
+  SET tx6.block_number = 25415844, tx6.value_eth = 0.00
+MERGE (tx7:SampleTransaction {hash: '0xtxsample007'})
+  SET tx7.block_number = 25415910, tx7.value_eth = 2.10
+MERGE (tx8:SampleTransaction {hash: '0xtxsample008'})
+  SET tx8.block_number = 25415955, tx8.value_eth = 0.15
+MERGE (tx9:SampleTransaction {hash: '0xtxsample009'})
+  SET tx9.block_number = 25416001, tx9.value_eth = 0.00
+MERGE (tx10:SampleTransaction {hash: '0xtxsample010'})
+  SET tx10.block_number = 25416077, tx10.value_eth = 4.60
+MERGE (tx11:SampleTransaction {hash: '0xtxsample011'})
+  SET tx11.block_number = 25416125, tx11.value_eth = 0.05
+MERGE (tx12:SampleTransaction {hash: '0xtxsample012'})
+  SET tx12.block_number = 25416190, tx12.value_eth = 0.00
 
 MERGE (alice)-[:SENT {value_eth: 1.25}]->(tx1)
 MERGE (tx1)-[:RECEIVED]->(bob)
@@ -162,6 +202,30 @@ MERGE (dex)-[:SENT]->(tx3)
 MERGE (tx3)-[:RECEIVED]->(carol)
 MERGE (token)-[:TOKEN_TRANSFER {amount: 2500, block_number: 25415710}]->(carol)
 MERGE (bob)-[:APPROVED {token: 'SAMP'}]->(dex)
+MERGE (carol)-[:SENT {value_eth: 3.20}]->(tx4)
+MERGE (tx4)-[:RECEIVED]->(bridge)
+MERGE (bridge)-[:SENT {value_eth: 2.95}]->(tx5)
+MERGE (tx5)-[:RECEIVED]->(dave)
+MERGE (dave)-[:SENT]->(tx6)
+MERGE (tx6)-[:RECEIVED]->(staking)
+MERGE (staking)-[:REWARD {value_eth: 0.18}]->(erin)
+MERGE (erin)-[:SENT {value_eth: 2.10}]->(tx7)
+MERGE (tx7)-[:RECEIVED]->(frank)
+MERGE (frank)-[:SENT {value_eth: 0.15}]->(tx8)
+MERGE (tx8)-[:RECEIVED]->(market)
+MERGE (market)-[:SENT]->(tx9)
+MERGE (tx9)-[:RECEIVED]->(grace)
+MERGE (grace)-[:SENT {value_eth: 4.60}]->(tx10)
+MERGE (tx10)-[:RECEIVED]->(dex)
+MERGE (dex)-[:SENT {value_eth: 0.05}]->(tx11)
+MERGE (tx11)-[:RECEIVED]->(heidi)
+MERGE (heidi)-[:SENT]->(tx12)
+MERGE (tx12)-[:RECEIVED]->(miner)
+MERGE (usdc)-[:TOKEN_TRANSFER {amount: 1250000, block_number: 25415844}]->(dave)
+MERGE (usdc)-[:TOKEN_TRANSFER {amount: 780000, block_number: 25416077}]->(dex)
+MERGE (nft)-[:NFT_TRANSFER {token_id: 42, block_number: 25415955}]->(grace)
+MERGE (alice)-[:WATCHES]->(market)
+MERGE (miner)-[:VALIDATED]->(tx12)
 
 WITH 1 AS ignored
 MATCH (n)
@@ -299,14 +363,34 @@ if [[ "$GENERATE_HTML" == true ]]; then
   </svg>
   <script>
     const nodes = [
-      { id: "alice", label: "Alice", caption: "SampleAddress", type: "address", x: 120, y: 180 },
-      { id: "tx1", label: "tx1", caption: "SampleTransaction", type: "transaction", x: 300, y: 180 },
-      { id: "bob", label: "Bob", caption: "SampleAddress", type: "address", x: 480, y: 180 },
-      { id: "tx2", label: "tx2", caption: "SampleTransaction", type: "transaction", x: 660, y: 180 },
-      { id: "dex", label: "DEX", caption: "SampleAddress", type: "address", x: 840, y: 180 },
-      { id: "tx3", label: "tx3", caption: "SampleTransaction", type: "transaction", x: 660, y: 380 },
-      { id: "carol", label: "Carol", caption: "SampleAddress", type: "address", x: 480, y: 380 },
-      { id: "token", label: "SAMP", caption: "SampleToken", type: "token", x: 300, y: 380 }
+      { id: "alice", label: "Alice", caption: "SampleAddress", type: "address", x: 90, y: 130 },
+      { id: "tx1", label: "tx1", caption: "SampleTransaction", type: "transaction", x: 240, y: 130 },
+      { id: "bob", label: "Bob", caption: "SampleAddress", type: "address", x: 390, y: 130 },
+      { id: "tx2", label: "tx2", caption: "SampleTransaction", type: "transaction", x: 540, y: 130 },
+      { id: "dex", label: "DEX", caption: "SampleAddress", type: "address", x: 690, y: 130 },
+      { id: "tx3", label: "tx3", caption: "SampleTransaction", type: "transaction", x: 840, y: 130 },
+      { id: "carol", label: "Carol", caption: "SampleAddress", type: "address", x: 990, y: 130 },
+      { id: "bridge", label: "Bridge", caption: "SampleAddress", type: "address", x: 90, y: 330 },
+      { id: "tx4", label: "tx4", caption: "SampleTransaction", type: "transaction", x: 240, y: 330 },
+      { id: "dave", label: "Dave", caption: "SampleAddress", type: "address", x: 390, y: 330 },
+      { id: "tx5", label: "tx5", caption: "SampleTransaction", type: "transaction", x: 540, y: 330 },
+      { id: "staking", label: "Stake", caption: "SampleAddress", type: "address", x: 690, y: 330 },
+      { id: "tx6", label: "tx6", caption: "SampleTransaction", type: "transaction", x: 840, y: 330 },
+      { id: "erin", label: "Erin", caption: "SampleAddress", type: "address", x: 990, y: 330 },
+      { id: "frank", label: "Frank", caption: "SampleAddress", type: "address", x: 90, y: 530 },
+      { id: "tx7", label: "tx7", caption: "SampleTransaction", type: "transaction", x: 240, y: 530 },
+      { id: "market", label: "Market", caption: "SampleAddress", type: "address", x: 390, y: 530 },
+      { id: "tx8", label: "tx8", caption: "SampleTransaction", type: "transaction", x: 540, y: 530 },
+      { id: "grace", label: "Grace", caption: "SampleAddress", type: "address", x: 690, y: 530 },
+      { id: "tx9", label: "tx9", caption: "SampleTransaction", type: "transaction", x: 840, y: 530 },
+      { id: "heidi", label: "Heidi", caption: "SampleAddress", type: "address", x: 990, y: 530 },
+      { id: "tx10", label: "tx10", caption: "SampleTransaction", type: "transaction", x: 1140, y: 330 },
+      { id: "tx11", label: "tx11", caption: "SampleTransaction", type: "transaction", x: 1140, y: 130 },
+      { id: "tx12", label: "tx12", caption: "SampleTransaction", type: "transaction", x: 1140, y: 530 },
+      { id: "miner", label: "Miner", caption: "SampleAddress", type: "address", x: 1290, y: 530 },
+      { id: "token", label: "SAMP", caption: "SampleToken", type: "token", x: 90, y: 730 },
+      { id: "usdc", label: "USDC", caption: "SampleToken", type: "token", x: 240, y: 730 },
+      { id: "nft", label: "SNFT", caption: "SampleToken", type: "token", x: 390, y: 730 }
     ];
 
     const edges = [
@@ -317,7 +401,31 @@ if [[ "$GENERATE_HTML" == true ]]; then
       { from: "dex", to: "tx3", label: "SENT" },
       { from: "tx3", to: "carol", label: "RECEIVED" },
       { from: "token", to: "carol", label: "TOKEN_TRANSFER 2500" },
-      { from: "bob", to: "dex", label: "APPROVED SAMP" }
+      { from: "bob", to: "dex", label: "APPROVED SAMP" },
+      { from: "carol", to: "tx4", label: "SENT 3.20 ETH" },
+      { from: "tx4", to: "bridge", label: "RECEIVED" },
+      { from: "bridge", to: "tx5", label: "SENT 2.95 ETH" },
+      { from: "tx5", to: "dave", label: "RECEIVED" },
+      { from: "dave", to: "tx6", label: "SENT" },
+      { from: "tx6", to: "staking", label: "RECEIVED" },
+      { from: "staking", to: "erin", label: "REWARD 0.18 ETH" },
+      { from: "erin", to: "tx7", label: "SENT 2.10 ETH" },
+      { from: "tx7", to: "frank", label: "RECEIVED" },
+      { from: "frank", to: "tx8", label: "SENT 0.15 ETH" },
+      { from: "tx8", to: "market", label: "RECEIVED" },
+      { from: "market", to: "tx9", label: "SENT" },
+      { from: "tx9", to: "grace", label: "RECEIVED" },
+      { from: "grace", to: "tx10", label: "SENT 4.60 ETH" },
+      { from: "tx10", to: "dex", label: "RECEIVED" },
+      { from: "dex", to: "tx11", label: "SENT 0.05 ETH" },
+      { from: "tx11", to: "heidi", label: "RECEIVED" },
+      { from: "heidi", to: "tx12", label: "SENT" },
+      { from: "tx12", to: "miner", label: "RECEIVED" },
+      { from: "usdc", to: "dave", label: "TOKEN_TRANSFER 1.25M" },
+      { from: "usdc", to: "dex", label: "TOKEN_TRANSFER 780K" },
+      { from: "nft", to: "grace", label: "NFT_TRANSFER #42" },
+      { from: "alice", to: "market", label: "WATCHES" },
+      { from: "miner", to: "tx12", label: "VALIDATED" }
     ];
 
     const svg = document.getElementById("graph");
