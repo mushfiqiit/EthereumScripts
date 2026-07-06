@@ -9,6 +9,7 @@ NEO4J_USER="${NEO4J_USER:-neo4j}"
 NEO4J_PASSWORD="${NEO4J_PASSWORD:-}"
 NEO4J_DATABASE="${NEO4J_DATABASE:-neo4j}"
 RESET_SAMPLE=false
+RUN_VISUALIZATION_QUERY=true
 
 usage() {
   cat <<'USAGE'
@@ -23,13 +24,17 @@ Options:
   --password PASS    Neo4j password (default: prompt, or NEO4J_PASSWORD)
   --database DB      Neo4j database (default: neo4j, or NEO4J_DATABASE)
   --reset-sample     Delete only previously-created sample nodes first
+  --no-query         Create the sample graph but skip the final test query
   -h, --help         Show this help and exit
 
 Examples:
   ./create_neo4j_sample_graph.sh
   NEO4J_PASSWORD='your-password' ./create_neo4j_sample_graph.sh --reset-sample
 
-After it runs, open http://localhost:7474 and run:
+By default, this script also runs the sample graph query through cypher-shell,
+so you do not need to paste Cypher into Bash manually. To see the graph
+visually, open http://localhost:7474 and use the query shown in the final
+script output if you want to inspect it in Neo4j Browser:
   MATCH p=(:SampleAddress)-[*1..2]-(:SampleAddress) RETURN p;
 USAGE
 }
@@ -70,6 +75,10 @@ while (( $# > 0 )); do
       ;;
     --reset-sample)
       RESET_SAMPLE=true
+      shift
+      ;;
+    --no-query)
+      RUN_VISUALIZATION_QUERY=false
       shift
       ;;
     -h|--help)
@@ -151,18 +160,51 @@ cypher-shell \
   -d "$NEO4J_DATABASE" \
   -f "$CYPHER_FILE"
 
+if [[ "$RUN_VISUALIZATION_QUERY" == true ]]; then
+  cat > "$CYPHER_FILE" <<'CYPHER'
+MATCH p=(:SampleAddress)-[*1..2]-(:SampleAddress)
+RETURN p;
+CYPHER
+
+  echo
+  echo "Running the sample graph query through cypher-shell now:"
+  echo "  MATCH p=(:SampleAddress)-[*1..2]-(:SampleAddress) RETURN p;"
+  echo
+
+  cypher-shell \
+    -a "$NEO4J_URI" \
+    -u "$NEO4J_USER" \
+    -p "$NEO4J_PASSWORD" \
+    -d "$NEO4J_DATABASE" \
+    -f "$CYPHER_FILE"
+fi
+
 cat <<INFO
 
 Sample graph loaded successfully.
+INFO
+
+if [[ "$RUN_VISUALIZATION_QUERY" == true ]]; then
+  echo "The sample graph query has already been run by this script."
+else
+  echo "The sample graph query was skipped because --no-query was provided."
+fi
+
+cat <<INFO
 
 Open Neo4j Browser:
   http://localhost:7474
 
-Then run this Cypher query to visualize the sample graph:
+If you want a visual graph view in Neo4j Browser, paste the same query into
+the Neo4j Browser query editor, not into the Bash terminal:
   MATCH p=(:SampleAddress)-[*1..2]-(:SampleAddress) RETURN p;
 
 If Neo4j Browser asks for connection details, use:
   Connect URL: ${NEO4J_URI}
   Username   : ${NEO4J_USER}
   Database   : ${NEO4J_DATABASE}
+
+If you want to test the query from Bash instead, run it through cypher-shell:
+  cypher-shell -a "${NEO4J_URI}" -u "${NEO4J_USER}" -d "${NEO4J_DATABASE}" \
+    "MATCH p=(:SampleAddress)-[*1..2]-(:SampleAddress) RETURN p;"
 INFO
