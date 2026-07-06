@@ -2,3 +2,14 @@
 /ScamAddressAnalysis/matched_eth_address_activity
 /NewCSVs
 /AddressIndexes
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+AddressTracing/output/
+sample_neo4j_graph.html
+*.sqlite-wal
+*.sqlite-shm
+neo4j-data/
+neo4j-logs/
