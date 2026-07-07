@@ -24,6 +24,16 @@ ROOT_RE = re.compile(r"^Ethereum_TT_(\d+)_(\d+)$")
 DB_RE = re.compile(r"^address_block_index_(\d+)_(\d+)\.sqlite$")
 
 
+def configure_csv_field_limit() -> int:
+    """Raise CSV parser field size limit for large transaction input/calldata fields."""
+    limit = sys.maxsize
+    while True:
+        try:
+            return csv.field_size_limit(limit)
+        except OverflowError:
+            limit //= 10
+
+
 @dataclass(frozen=True)
 class Occurrence:
     block_number: int
@@ -179,6 +189,7 @@ class LruCsvCache:
 
 class GraphBuilder:
     def __init__(self, csv_parent: Path, index_parent: Path, ranges: tuple[tuple[int, int], ...], token_metadata: dict[str, int], csv_cache_size: int) -> None:
+        configure_csv_field_limit()
         self.range_dirs = discover_range_dirs(csv_parent, ranges)
         missing_csv = [f"Ethereum_TT_{s}_{e}" for s, e in ranges if (s, e) not in self.range_dirs]
         if missing_csv:
@@ -319,6 +330,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    configure_csv_field_limit()
     args = parse_args()
     if args.max_depth < 0:
         raise SystemExit("--max-depth must be non-negative")
