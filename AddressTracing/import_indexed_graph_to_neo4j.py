@@ -54,8 +54,15 @@ MERGE (a:Address {{graph_id: {graph}, address: row.address}})
 SET a.display_label = row.display_label,
     a.distance = row.distance,
     a.is_root = row.is_root,
+    a.flow_role = row.flow_role,
     a.visual_label = CASE WHEN row.is_root THEN 'ROOT ' + row.display_label ELSE row.display_label END,
-    a.color = CASE WHEN row.is_root THEN '#dc2626' ELSE '#2563eb' END,
+    a.color = CASE row.flow_role
+        WHEN 'root' THEN '#dc2626'
+        WHEN 'upstream' THEN '#2563eb'
+        WHEN 'downstream' THEN '#facc15'
+        WHEN 'both' THEN '#a855f7'
+        ELSE '#64748b'
+    END,
     a.size = CASE WHEN row.is_root THEN 48 ELSE 40 END
 FOREACH (_ IN CASE WHEN row.is_root THEN [1] ELSE [] END | SET a:RootAddress)
 FOREACH (_ IN CASE WHEN row.is_root THEN [] ELSE [1] END | SET a:TracedAddress);
@@ -124,6 +131,7 @@ def build_html_payload(nodes: list[dict[str, Any]], edges: list[dict[str, Any]])
                 "caption": f"distance {distance}",
                 "distance": distance,
                 "is_root": str(node.get("is_root", "false")).lower() == "true",
+                "flow_role": str(node.get("flow_role") or "connected"),
                 "x": left + distance * column_width,
                 "y": top + index * row_height,
             })
@@ -167,9 +175,14 @@ def write_html_visualization(nodes: list[dict[str, Any]], edges: list[dict[str, 
     .node {{ cursor: move; filter: drop-shadow(0 7px 14px rgba(0, 0, 0, 0.35)); }}
     .node circle {{ stroke: #f8fafc; stroke-width: 2; }}
     .node.root circle {{ fill: #dc2626; }}
-    .node.address circle {{ fill: #2563eb; }}
+    .node.upstream circle {{ fill: #2563eb; }}
+    .node.downstream circle {{ fill: #facc15; }}
+    .node.both circle {{ fill: #a855f7; }}
+    .node.connected circle {{ fill: #64748b; }}
     .legend-root {{ color: #fca5a5; font-weight: 800; }}
-    .legend-address {{ color: #93c5fd; font-weight: 800; }}
+    .legend-upstream {{ color: #93c5fd; font-weight: 800; }}
+    .legend-downstream {{ color: #fde68a; font-weight: 800; }}
+    .legend-both {{ color: #d8b4fe; font-weight: 800; }}
     .node text {{ fill: white; font-size: 12px; font-weight: 800; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }}
     .caption {{ fill: #dbeafe; font-size: 11px; text-anchor: middle; pointer-events: none; }}
   </style>
@@ -177,7 +190,7 @@ def write_html_visualization(nodes: list[dict[str, Any]], edges: list[dict[str, 
 <body>
   <header>
     <h1 id="title"></h1>
-    <p>Standalone scrollable HTML export. Use browser scrollbars to reach the full canvas; drag nodes to rearrange locally. <span class="legend-root">Root/source node is red</span>; <span class="legend-address">other nodes are blue</span>. Nodes: {len(html_nodes)} | Edges: {len(html_edges)}</p>
+    <p>Standalone scrollable HTML export. Scroll to view the full canvas; drag nodes to rearrange locally. <span class="legend-root">Root is red</span>; <span class="legend-upstream">senders to root are blue</span>; <span class="legend-downstream">receivers from root are yellow</span>; <span class="legend-both">both-direction nodes are purple</span>. Nodes: {len(html_nodes)} | Edges: {len(html_edges)}</p>
   </header>
   <svg id="graph" role="img" aria-label="Scrollable AddressTracing graph">
     <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"></path></marker></defs>

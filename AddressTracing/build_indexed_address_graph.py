@@ -47,6 +47,7 @@ class Node:
     display_label: str
     distance: int
     is_root: bool
+    flow_role: str = "connected"
 
 
 @dataclass
@@ -260,6 +261,41 @@ class GraphBuilder:
             display_label=f"{normalized} {short_token(token)} | block {block}",
         )
 
+    @staticmethod
+    def assign_flow_roles(source: str, nodes: dict[str, Node], edges: dict[str, Edge]) -> None:
+        """Mark nodes by directed money-flow relation to the source node."""
+        outgoing: dict[str, set[str]] = {address: set() for address in nodes}
+        incoming: dict[str, set[str]] = {address: set() for address in nodes}
+        for edge in edges.values():
+            if edge.from_address in nodes and edge.to_address in nodes:
+                outgoing.setdefault(edge.from_address, set()).add(edge.to_address)
+                incoming.setdefault(edge.to_address, set()).add(edge.from_address)
+
+        def walk(adjacency: dict[str, set[str]]) -> set[str]:
+            seen: set[str] = set()
+            stack = list(adjacency.get(source, set()))
+            while stack:
+                address = stack.pop()
+                if address in seen or address == source:
+                    continue
+                seen.add(address)
+                stack.extend(adjacency.get(address, set()) - seen)
+            return seen
+
+        downstream = walk(outgoing)
+        upstream = walk(incoming)
+        for address, node in nodes.items():
+            if address == source:
+                node.flow_role = "root"
+            elif address in upstream and address in downstream:
+                node.flow_role = "both"
+            elif address in upstream:
+                node.flow_role = "upstream"
+            elif address in downstream:
+                node.flow_role = "downstream"
+            else:
+                node.flow_role = "connected"
+
     def build(self, source_address: str, max_depth: int) -> tuple[dict[str, Node], dict[str, Edge]]:
         source = normalize_address(source_address)
         if source is None:
@@ -291,6 +327,7 @@ class GraphBuilder:
                 "Missing token decimals for token address(es): " + sample +
                 ". Provide --token-metadata-csv with token_address,decimals columns."
             )
+        self.assign_flow_roles(source, nodes, edges)
         return nodes, edges
 
 
@@ -300,7 +337,7 @@ def write_outputs(nodes: dict[str, Node], edges: dict[str, Edge], output_root: P
     node_rows = sorted(nodes.values(), key=lambda n: (n.distance, n.address))
     edge_rows = sorted(edges.values(), key=lambda e: (e.block_number, e.edge_id))
     with (graph_dir / "nodes.csv").open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["address", "display_label", "distance", "is_root"])
+        writer = csv.DictWriter(f, fieldnames=["address", "display_label", "distance", "is_root", "flow_role"])
         writer.writeheader(); writer.writerows(asdict(n) for n in node_rows)
     edge_fields = list(asdict(edge_rows[0]).keys()) if edge_rows else list(Edge("","","","","","","",0,"",0,"","","").__dict__.keys())
     with (graph_dir / "edges.csv").open("w", newline="", encoding="utf-8") as f:
