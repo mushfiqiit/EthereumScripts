@@ -9,10 +9,17 @@ Input layout (produced by extract_newcsvs_transactions_tokentransfers.sh):
   <root>/Transaction_TokenTransfer_<chunk_start>_<chunk_end>/transaction_<block>.csv
   <root>/Transaction_TokenTransfer_<chunk_start>_<chunk_end>/token_transfer_<block>.csv
 
-Output: one SQLite database containing an `edges` table where each row is a
-single transfer (ETH transaction or ERC-20/ERC-721 token transfer) with both
-endpoints, indexed on from_address and to_address so "who did this address
-send to / receive from" is a single indexed lookup instead of a CSV scan.
+Output: one SQLite database containing:
+
+  - an `edges` table where each row is a single transfer (ETH transaction or
+    ERC-20/ERC-721 token transfer) with both endpoints, indexed on
+    from_address and to_address so "who did this address send to / receive
+    from" is a single indexed lookup instead of a CSV scan.
+  - a `degree` table with precomputed out_count/in_count per address, so a
+    BFS trace can recognize hub addresses (exchanges, routers, popular
+    contracts) with one indexed lookup instead of counting their edges on
+    the fly - see trace_address_flow_bfs.py, which uses this to cap
+    per-address fan-out and avoid exploring through hubs unbounded.
 """
 
 from __future__ import annotations
@@ -126,12 +133,47 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_address, block_number)")
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS degree (
+            address   TEXT PRIMARY KEY,
+            out_count INTEGER NOT NULL DEFAULT 0,
+            in_count  INTEGER NOT NULL DEFAULT 0
+        ) WITHOUT ROWID
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS metadata (
             key   TEXT PRIMARY KEY,
             value TEXT
         )
         """
     )
+
+
+def rebuild_degree_table(conn: sqlite3.Connection) -> int:
+    """Recompute per-address out/in edge counts for this shard.
+
+    Lets a tracer recognize hub addresses (exchanges, routers, popular
+    contracts) with a single indexed lookup instead of counting their edges
+    on the fly - counting a hub's rows just to decide whether to cap it
+    would defeat the point of capping it.
+    """
+    conn.execute("DELETE FROM degree")
+    conn.execute(
+        """
+        INSERT INTO degree(address, out_count, in_count)
+        SELECT address,
+               SUM(CASE WHEN dir = 'out' THEN cnt ELSE 0 END),
+               SUM(CASE WHEN dir = 'in' THEN cnt ELSE 0 END)
+        FROM (
+            SELECT from_address AS address, 'out' AS dir, COUNT(*) AS cnt FROM edges GROUP BY from_address
+            UNION ALL
+            SELECT to_address AS address, 'in' AS dir, COUNT(*) AS cnt FROM edges GROUP BY to_address
+        )
+        GROUP BY address
+        """
+    )
+    return conn.execute("SELECT COUNT(*) FROM degree").fetchone()[0]
 
 
 def upsert_metadata(conn: sqlite3.Connection, data: dict[str, str]) -> None:
@@ -279,6 +321,10 @@ def main() -> int:
 
         writer.close()
 
+        print("Computing per-address degree table...")
+        degree_rows = rebuild_degree_table(conn)
+        conn.commit()
+
         range_start = min(s for _, s, _ in chunk_folders)
         range_end = max(e for _, _, e in chunk_folders)
         created_at = datetime.now(timezone.utc).isoformat()
@@ -294,6 +340,7 @@ def main() -> int:
                 "transaction_rows_read": str(total_tx_rows),
                 "token_transfer_rows_read": str(total_tt_rows),
                 "edges_inserted": str(writer.inserted_total),
+                "degree_rows": str(degree_rows),
             },
         )
         conn.commit()
@@ -302,7 +349,7 @@ def main() -> int:
         print(
             f"\nDone in {elapsed:.1f}s: tx_files={total_tx_files}, tt_files={total_tt_files}, "
             f"tx_rows_read={total_tx_rows}, tt_rows_read={total_tt_rows}, "
-            f"edges_inserted={writer.inserted_total}"
+            f"edges_inserted={writer.inserted_total}, degree_rows={degree_rows}"
         )
         print(f"Range: {range_start}-{range_end}")
     finally:
