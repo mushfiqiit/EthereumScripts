@@ -13,10 +13,14 @@ readonly DEFAULT_OUTPUT_DIR="./AddressFlow/output"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly DEFAULT_TRACER_SCRIPT="${SCRIPT_DIR}/trace_address_flow_bfs.py"
 readonly DEFAULT_MAX_DEPTH=4
+readonly DEFAULT_MAX_EDGES_PER_NODE=1000
+readonly DEFAULT_MAX_NODES=20000
 readonly RANGE_SIZE=7200
 
 ADDRESS=""
 MAX_DEPTH="$DEFAULT_MAX_DEPTH"
+MAX_EDGES_PER_NODE="$DEFAULT_MAX_EDGES_PER_NODE"
+MAX_NODES="$DEFAULT_MAX_NODES"
 INDEX_DIR="$DEFAULT_INDEX_DIR"
 OUTPUT_DIR="$DEFAULT_OUTPUT_DIR"
 TOKEN_METADATA_CSV=""
@@ -40,6 +44,15 @@ Required:
 
 Options:
   --max-depth N            Maximum BFS hop distance (default: 4)
+  --max-edges-per-node N    Cap on edges kept per address, both directions
+                             combined, most-recent-block first (default: 1000).
+                             Bounds hub addresses (exchanges, routers, popular
+                             contracts) that would otherwise blow up the search
+                             - this is what keeps a --max-depth 4 trace from
+                             taking hours if it touches a busy address.
+  --max-nodes N             Hard cap on total distinct addresses collected
+                             (default: 20000). Guarantees the run terminates
+                             in bounded time regardless of graph shape.
   --index-dir DIR           Directory containing *.sqlite edge indexes
                              (default: build_block_range_sqlite_index.py's default output dir)
   --start-block BLOCK       Inclusive first block to trace over. Must be paired
@@ -102,6 +115,16 @@ while (( $# > 0 )); do
       MAX_DEPTH="$2"
       shift 2
       ;;
+    --max-edges-per-node)
+      require_value "$1" "${2-}"
+      MAX_EDGES_PER_NODE="$2"
+      shift 2
+      ;;
+    --max-nodes)
+      require_value "$1" "${2-}"
+      MAX_NODES="$2"
+      shift 2
+      ;;
     --index-dir)
       require_value "$1" "${2-}"
       INDEX_DIR="$2"
@@ -142,6 +165,8 @@ done
 [[ -n "$ADDRESS" ]] || die "--address is required."
 [[ "$ADDRESS" =~ ^0x[0-9a-fA-F]+$ ]] || die "--address must start with 0x."
 [[ "$MAX_DEPTH" =~ ^[0-9]+$ ]] || die "--max-depth must be a non-negative integer."
+[[ "$MAX_EDGES_PER_NODE" =~ ^[0-9]+$ ]] && (( MAX_EDGES_PER_NODE >= 1 )) || die "--max-edges-per-node must be a positive integer."
+[[ "$MAX_NODES" =~ ^[0-9]+$ ]] && (( MAX_NODES >= 1 )) || die "--max-nodes must be a positive integer."
 [[ -d "$INDEX_DIR" ]] || die "index directory not found: ${INDEX_DIR}"
 
 if [[ -n "$START_BLOCK" || -n "$END_BLOCK" ]]; then
@@ -182,6 +207,8 @@ fi
 ARGS=(
   --address "$ADDRESS"
   --max-depth "$MAX_DEPTH"
+  --max-edges-per-node "$MAX_EDGES_PER_NODE"
+  --max-nodes "$MAX_NODES"
   --output-dir "$OUTPUT_DIR"
 )
 if [[ -n "$START_BLOCK" ]]; then

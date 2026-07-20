@@ -48,8 +48,8 @@ def cypher_literal(value: Any) -> str:
     return json.dumps(value)
 
 
-INT_FIELDS = {"distance", "block_number", "decimals"}
-BOOL_FIELDS = {"is_root"}
+INT_FIELDS = {"distance", "block_number", "decimals", "total_degree"}
+BOOL_FIELDS = {"is_root", "is_hub"}
 
 
 def map_literal(row: dict[str, Any]) -> str:
@@ -143,6 +143,8 @@ MERGE (a:Address {{graph_id: {graph}, address: row.address}})
 SET a.label = row.label,
     a.distance = row.distance,
     a.is_root = row.is_root,
+    a.is_hub = row.is_hub,
+    a.total_degree = row.total_degree,
     a.flow_role = row.flow_role,
     a.visual_label = CASE WHEN row.is_root THEN 'ROOT ' + row.label ELSE row.label END,
     a.color = CASE row.flow_role
@@ -152,9 +154,10 @@ SET a.label = row.label,
         WHEN 'both' THEN '#a855f7'
         ELSE '#64748b'
     END,
-    a.size = CASE WHEN row.is_root THEN 48 ELSE 40 END
+    a.size = CASE WHEN row.is_root THEN 48 WHEN row.is_hub THEN 44 ELSE 40 END
 FOREACH (_ IN CASE WHEN row.is_root THEN [1] ELSE [] END | SET a:RootAddress)
-FOREACH (_ IN CASE WHEN row.is_root THEN [] ELSE [1] END | SET a:TracedAddress);
+FOREACH (_ IN CASE WHEN row.is_root THEN [] ELSE [1] END | SET a:TracedAddress)
+FOREACH (_ IN CASE WHEN row.is_hub THEN [1] ELSE [] END | SET a:HubAddress);
 """.strip()
     )
 
